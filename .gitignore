@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+train_env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+data/hagrid/          # Dataset is too large for git
+models/*.h5           # Trained models are large
+*.pyc
+
+# Results (optional - can commit these)
+# evaluation_results.json
+# confusion_matrix.png
+# training_history.png

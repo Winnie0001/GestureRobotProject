@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<!--
+  Gesture Control Robot Navigation Launch File
+  Project: BA-25-1058 | Student: Mmesoma Kenneth (202307951)
+
+  Launches gesture recognition node for robot control.
+
+  Usage:
+    roslaunch HonoursProject-ROS gesture_control.launch
+    roslaunch HonoursProject-ROS gesture_control.launch mode:=cnn model:=models/gesture_model.h5
+-->
+
+<launch>
+  <!-- Arguments -->
+  <arg name="mode" default="rule" doc="Classifier mode: rule or cnn"/>
+  <arg name="model" default="" doc="Path to CNN model (required if mode=cnn)"/>
+  <arg name="linear_speed" default="0.3" doc="Linear velocity (m/s)"/>
+  <arg name="angular_speed" default="0.5" doc="Angular velocity (rad/s)"/>
+
+  <!-- Gesture Recognition Node -->
+  <node name="gesture_control_node" pkg="honours_project_ros" type="ros_gesture_node.py" output="screen">
+    <param name="mode" value="$(arg mode)"/>
+    <param name="model_path" value="$(arg model)" if="$(eval mode == 'cnn')"/>
+    <param name="linear_speed" value="$(arg linear_speed)"/>
+    <param name="angular_speed" value="$(arg angular_speed)"/>
+  </node>
+
+  <!-- Optional: RViz for visualization -->
+  <!-- <node name="rviz" pkg="rviz" type="rviz" args="-d $(find honours_project_ros)/config/gesture_control.rviz"/> -->
+
+</launch>

@@ -148,24 +148,91 @@ class RuleBasedClassifier:
 
 class CNNClassifier:
     """
-    Placeholder CNN classifier (MobileNetV2).
-    Will be implemented when TensorFlow is available.
+    CNN-based gesture classifier using trained MobileNetV2 model.
+    Loads model from train_model.py and performs real-time inference.
     """
 
     IMG_SIZE = (224, 224)
     NUM_CLASSES = 5
 
-    def __init__(self, model_path: Optional[str] = None):
-        self.model = None
-        print("[CNNClassifier] CNN mode not available (TensorFlow not installed)")
-        print("[CNNClassifier] For training, use Python 3.11 or 3.12 with TensorFlow support")
+    def __init__(self, model_path: str):
+        """
+        Load trained CNN model.
 
-    def predict(self, frame_bgr: np.ndarray) -> Tuple[str, float]:
-        """Dummy predict (returns random gesture)."""
-        raise RuntimeError("CNN model not loaded. Use --mode rule instead.")
+        Args:
+            model_path: Path to trained .h5 model file
+        """
+        if model_path is None:
+            raise ValueError("model_path is required for CNNClassifier")
+
+        try:
+            import tensorflow as tf
+            self.model = tf.keras.models.load_model(model_path)
+            print(f"[CNNClassifier] ✓ Loaded model from {model_path}")
+        except ImportError:
+            raise ImportError(
+                "TensorFlow not installed. Install with: pip install tensorflow>=2.13.0"
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to load model from {model_path}: {e}")
+
+    def preprocess(self, frame_bgr: np.ndarray) -> np.ndarray:
+        """
+        Preprocess frame for CNN input.
+
+        Args:
+            frame_bgr: OpenCV BGR image
+
+        Returns:
+            Preprocessed image tensor (1, 224, 224, 3)
+        """
+        # Resize to model input size
+        img = cv2.resize(frame_bgr, self.IMG_SIZE)
+
+        # Convert BGR to RGB (TensorFlow expects RGB)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        # Normalize to [0, 1]
+        img = img.astype(np.float32) / 255.0
+
+        # Add batch dimension
+        img = np.expand_dims(img, axis=0)
+
+        return img
+
+    def predict(self, frame_bgr: np.ndarray) -> Tuple[Optional[str], float]:
+        """
+        Predict gesture from frame.
+
+        Args:
+            frame_bgr: OpenCV BGR image
+
+        Returns:
+            Tuple of (gesture_name, confidence)
+        """
+        if self.model is None:
+            return None, 0.0
+
+        # Preprocess
+        img_tensor = self.preprocess(frame_bgr)
+
+        # Inference
+        predictions = self.model.predict(img_tensor, verbose=0)
+
+        # Get top prediction
+        class_idx = np.argmax(predictions[0])
+        confidence = float(predictions[0][class_idx])
+
+        # Map to gesture name
+        gesture_name = GESTURE_LABELS.get(class_idx, None)
+
+        return gesture_name, confidence
 
     def save(self, path: str):
-        pass
+        """Save model to disk."""
+        if self.model is not None:
+            self.model.save(path)
+            print(f"[CNNClassifier] Model saved to {path}")
 
 
 # ── Temporal Smoother ─────────────────────────────────────────────────────────

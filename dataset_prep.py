@@ -72,7 +72,7 @@ class HaGRIDDatasetPrep:
                     filename = gesture_dir / f"{gesture_name}_{i:04d}.jpg"
                     cv2.imwrite(str(filename), img)
 
-                print(f"  ✓ {gesture_name} ({split}): {n_samples} samples")
+                print(f"  [OK] {gesture_name} ({split}): {n_samples} samples")
 
         print(f"[DatasetPrep] Dataset created at {self.output_dir}\n")
         return self.output_dir
