@@ -3,7 +3,7 @@
 **Project**: BA-25-1058
 **Student**: Mmesoma Kenneth (202307951)
 **Supervisor**: Baseer Ahmad
-**Status**: Implementation Complete ✅
+**Status**: Implementation Complete
 
 ---
 
@@ -12,18 +12,18 @@
 This project implements an AI-driven hand gesture recognition system for controlling mobile robots using ROS. The system uses deep learning (CNN) for accurate gesture classification and integrates with ROS navigation for real-time robot control.
 
 **Key Features:**
-- ✅ CNN-based gesture classifier (MobileNetV2)
-- ✅ Rule-based baseline for comparison
-- ✅ ROS integration for robot control
-- ✅ Real-time inference (<200ms latency)
-- ✅ Comprehensive evaluation framework
+- CNN-based gesture classifier (MobileNetV2)
+- Rule-based baseline for comparison
+- ROS integration for robot control
+- Real-time inference (<200ms latency)
+- Evaluation framework
 
 **Gestures Supported:**
-- 🤛 **Closed Fist** → STOP
-- ✋ **Open Hand** → FORWARD
-- 👍 **Thumbs Up** → LEFT
-- ✌️ **Peace Sign** → RIGHT
-- 👆 **Pointing** → BACKWARD
+- **Closed Fist** -> STOP
+- **Open Hand** -> FORWARD
+- **Thumbs Up** -> LEFT
+- **Peace Sign** -> RIGHT
+- **Pointing** -> BACKWARD
 
 ---
 
@@ -184,24 +184,24 @@ In `control_mode:=nav`, the robot controller sends `move_base` goals in the `map
 
 ```
 HonoursProject-ROS/
-├── gesture_classifier.py          # Core classifiers (Rule + CNN)
-├── train_model.py                 # CNN training pipeline
-├── dataset_prep.py                # Dataset preparation
-├── evaluate_system.py             # Evaluation framework
-├── realtime_inference.py          # Real-time demo
-├── test_gesture_classifier.py     # Unit tests
-├── ros_gesture_node.py            # ROS integration node
-├── launch/
-│   └── gesture_control.launch     # ROS launch file
-├── requirements.txt               # Python dependencies
-├── package.xml                    # ROS package manifest
-├── CMakeLists.txt                 # ROS build configuration
-├── data/
-│   └── hagrid/                    # Dataset (train/val/test)
-├── models/
-│   ├── gesture_model.h5           # Trained CNN model
-│   └── training_history.png       # Training curves
-└── README.md                      # This file
+- gesture_classifier.py          # Core classifiers (Rule + CNN)
+- train_model.py                 # CNN training pipeline
+- dataset_prep.py                # Dataset preparation
+- evaluate_system.py             # Evaluation framework
+- realtime_inference.py          # Real-time demo
+- test_gesture_classifier.py     # Unit tests
+- ros_gesture_node.py            # ROS integration node
+- launch/
+  - gesture_control.launch     # ROS launch file
+- requirements.txt               # Python dependencies
+- package.xml                    # ROS package manifest
+- CMakeLists.txt                 # ROS build configuration
+- data/
+  - hagrid/                    # Dataset (train/val/test)
+- models/
+  - gesture_model.h5           # Trained CNN model
+  - training_history.png       # Training curves
+- README.md                      # This file
 ```
 
 ---
@@ -219,9 +219,9 @@ Webcam Frame
      ↓
 [Temporal Smoothing]
      ↓
-[Gesture → Command Mapping]
+[Gesture -> Command Mapping]
      ↓
-ROS Twist Message → /cmd_vel
+ROS Twist Message -> /cmd_vel
 ```
 
 ### CNN Architecture (MobileNetV2)
@@ -233,11 +233,11 @@ MobileNetV2 Base (pretrained on ImageNet)
      ↓
 GlobalAveragePooling2D
      ↓
-Dense(256, relu) → Dropout(0.3)
+Dense(256, relu) -> Dropout(0.3)
      ↓
-Dense(128, relu) → Dropout(0.2)
+Dense(128, relu) -> Dropout(0.2)
      ↓
-Dense(5, softmax) → [fist, palm, thumbs_up, victory, pointer]
+Dense(5, softmax) -> [fist, palm, thumbs_up, victory, pointer]
 ```
 
 ---

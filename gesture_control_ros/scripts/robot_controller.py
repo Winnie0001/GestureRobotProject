@@ -204,7 +204,7 @@ class RobotControllerNode:
                 return
 
             if command != self.current_command:
-                rospy.loginfo(f"Command: {self.current_command} → {command}")
+                rospy.loginfo(f"Command: {self.current_command} -> {command}")
                 self.current_command = command
                 self.command_count += 1
             return
@@ -240,7 +240,7 @@ class RobotControllerNode:
 
         # Update stats
         if command != self.current_command:
-            rospy.loginfo(f"Command: {self.current_command} → {command}")
+            rospy.loginfo(f"Command: {self.current_command} -> {command}")
             self.current_command = command
             self.command_count += 1
 

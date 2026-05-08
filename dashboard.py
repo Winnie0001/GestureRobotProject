@@ -21,13 +21,13 @@ from gesture_classifier import (
 # Colour palette (BGR)
 # ══════════════════════════════════════════════════════════════════════════════
 
-# One colour per gesture — consistent across bars and labels
+# One colour per gesture - consistent across bars and labels
 GESTURE_COLOURS = {
-    "closed_fist": (0,   60, 220),   # red    → STOP
-    "open_hand":   (0,  210,  80),   # green  → FORWARD
-    "thumbs_up":   (0,  170, 240),   # amber  → LEFT
-    "peace_sign":  (200, 200,  0),   # cyan   → RIGHT
-    "pointing":    (200,  80, 200),  # purple → BACKWARD
+    "closed_fist": (0,   60, 220),   # red    -> STOP
+    "open_hand":   (0,  210,  80),   # green  -> FORWARD
+    "thumbs_up":   (0,  170, 240),   # amber  -> LEFT
+    "peace_sign":  (200, 200,  0),   # cyan   -> RIGHT
+    "pointing":    (200,  80, 200),  # purple -> BACKWARD
 }
 
 _DARK  = (25,  25,  25)
@@ -59,7 +59,7 @@ class Dashboard:
     CMD_HISTORY = 8      # recent commands to show in strip
 
     def __init__(self) -> None:
-        # Confidence smoothing — exponential moving average per gesture
+        # Confidence smoothing - exponential moving average per gesture
         self._conf_ema: Dict[str, float] = {g: 0.0 for g in GESTURE_LABELS}
         self._ema_alpha = 0.25           # smoothing factor
 
@@ -76,7 +76,7 @@ class Dashboard:
         # Canvas
         self._canvas = np.zeros((self.DASH_H, self.DASH_W, 3), dtype=np.uint8)
 
-    # ── Public API ─────────────────────────────────────────────────────────────
+    # -- Public API -------------------------------------------------------------
 
     def update(
         self,
@@ -124,7 +124,7 @@ class Dashboard:
 
         return self._canvas.copy()
 
-    # ── Private: rendering ─────────────────────────────────────────────────────
+    # -- Private: rendering -----------------------------------------------------
 
     def _draw_title(self) -> None:
         cv2.putText(
@@ -270,7 +270,7 @@ class Dashboard:
             dominant = max(self._gesture_counts, key=self._gesture_counts.get)
             dom_pct  = self._gesture_counts[dominant] / self._total_detections * 100
         else:
-            dominant, dom_pct = "—", 0
+            dominant, dom_pct = "-", 0
 
         stats = [
             f"Uptime          : {uptime:6.1f} s",
@@ -355,7 +355,7 @@ def run(camera_idx: int = 0) -> None:
     cap.set(cv2.CAP_PROP_FPS,           30)
     cap.set(cv2.CAP_PROP_BUFFERSIZE,     1)
 
-    print("\n[Dashboard] Running — press Q to quit")
+    print("\n[Dashboard] Running - press Q to quit")
     print("  Two windows: webcam feed + analytics dashboard\n")
 
     fps_times: deque = deque(maxlen=30)
@@ -393,14 +393,14 @@ def run(camera_idx: int = 0) -> None:
             # Show gesture on webcam window
             if stable:
                 cmd = GESTURE_COMMANDS.get(stable, "")
-                cv2.putText(annotated, f"{stable}  →  {cmd}",
+                cv2.putText(annotated, f"{stable}  ->  {cmd}",
                             (12, 36), cv2.FONT_HERSHEY_SIMPLEX,
                             0.75, (0,210,80), 2)
 
             # Update and show dashboard
             dash_frame = dashboard.update(stable, confidences, fps)
 
-            cv2.imshow("Webcam — BA-25-1058", annotated)
+            cv2.imshow("Webcam - BA-25-1058", annotated)
             cv2.imshow("Analytics Dashboard", dash_frame)
 
             key = cv2.waitKey(1) & 0xFF
@@ -413,7 +413,7 @@ def run(camera_idx: int = 0) -> None:
         cap.release()
         cv2.destroyAllWindows()
         classifier.close()
-        print(f"\n[Dashboard] Session ended — {frame_count} frames")
+        print(f"\n[Dashboard] Session ended - {frame_count} frames")
 
 
 def main():

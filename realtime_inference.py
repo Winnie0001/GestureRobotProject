@@ -12,8 +12,8 @@ from gesture_classifier import (
     TemporalSmoother, GESTURE_COMMANDS,
 )
 
-# ── PyAutoGUI safety ──────────────────────────────────────────────────────────
-# Disable the corner fail-safe — we use screen-edge clamping instead,
+# -- PyAutoGUI safety ----------------------------------------------------------
+# Disable the corner fail-safe - we use screen-edge clamping instead,
 # so the program never crashes when the mouse reaches a screen corner.
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE    = 0.0
@@ -114,7 +114,7 @@ class GestureControlDemo:
                 pass
             self._tcp_sock = None
 
-    # ── Mouse control ──────────────────────────────────────────────────────────
+    # -- Mouse control ----------------------------------------------------------
 
     def _apply_command(self, command: str) -> None:
         """
@@ -149,7 +149,7 @@ class GestureControlDemo:
         except Exception:
             pass   # absorb any remaining edge-case errors silently
 
-    # ── HUD ───────────────────────────────────────────────────────────────────
+    # -- HUD -------------------------------------------------------------------
 
     def _draw_hud(self, frame, gesture=None, confidence=0.0, latency_ms=0.0):
         h, w = frame.shape[:2]
@@ -177,7 +177,7 @@ class GestureControlDemo:
 
         return frame
 
-    # ── Main loop ──────────────────────────────────────────────────────────────
+    # -- Main loop --------------------------------------------------------------
 
     def run(self):
         print(f"\n[START] Gesture Control ({self.mode.upper()} mode)")
@@ -247,7 +247,7 @@ class GestureControlDemo:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.50, status_col, 1,
                 )
 
-                cv2.imshow("Gesture Control — BA-25-1058", display)
+                cv2.imshow("Gesture Control - BA-25-1058", display)
 
                 # Keys
                 key = cv2.waitKey(1) & 0xFF
@@ -281,7 +281,7 @@ class GestureControlDemo:
         print(f"      Average FPS: {avg:.2f}")
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# -- Entry point ---------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="Real-time gesture demo")

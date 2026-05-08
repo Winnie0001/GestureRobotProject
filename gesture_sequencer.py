@@ -1,15 +1,13 @@
 """
-╔══════════════════════════════════════════════════════════════════════════════╗
-║          AI-Powered Gesture Control for Robot Navigation                     ║
-║          Project: BA-25-1058  |  Student: Mmesoma Winnie Kenneth (202307951) ║
-║          University of Hull   |  Honours Stage Project                       ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+AI-Powered Gesture Control for Robot Navigation
+Project: BA-25-1058 | Student: Mmesoma Winnie Kenneth (202307951)
+University of Hull | Honours Stage Project
 
 gesture_classifier.py
-─────────────────────
+--------------------
 Core classification module using the MediaPipe Tasks API (0.10.30+).
 
-  1. RuleBasedClassifier  — MediaPipe HandLandmarker in VIDEO mode.
+  1. RuleBasedClassifier  - MediaPipe HandLandmarker in VIDEO mode.
                             VIDEO mode gives temporal context across frames,
                             eliminating skeleton flicker and the NORM_RECT
                             warning seen with IMAGE mode.
@@ -26,18 +24,18 @@ Core classification module using the MediaPipe Tasks API (0.10.30+).
                               IP angle <= 150 deg =>  closed_fist
                             This is rotation-invariant and scale-invariant.
 
-  2. CNNClassifier        — MobileNetV2 transfer-learning wrapper.
+  2. CNNClassifier        - MobileNetV2 transfer-learning wrapper.
                             Two-phase fine-tuning on HaGRID dataset.
                             model_path=None builds architecture with
                             ImageNet weights for unit testing.
 
-  3. TemporalSmoother     — Recency-weighted majority vote + debounce.
+  3. TemporalSmoother     - Recency-weighted majority vote + debounce.
                             Newer frames weighted more than older ones.
                             Emits only when winner holds >= 60% of
                             weighted votes and debounce has elapsed.
 
 Gesture -> Robot Command Mapping
-─────────────────────────────────
+---------------------------------
   closed_fist  ->  STOP
   open_hand    ->  FORWARD
   thumbs_up    ->  LEFT
@@ -45,7 +43,7 @@ Gesture -> Robot Command Mapping
   pointing     ->  BACKWARD
 
 ROS2 Velocity Profiles
-───────────────────────
+-----------------------
   FORWARD:  linear.x = +0.30 m/s
   BACKWARD: linear.x = -0.20 m/s
   LEFT:     angular.z = +0.50 rad/s
@@ -53,7 +51,7 @@ ROS2 Velocity Profiles
   STOP:     all zero
 
 References
-──────────
+----------
   Zhang et al. (2020) MediaPipe Hands. CVPR Workshops.
   Howard et al. (2017) MobileNets. arXiv:1704.04861.
   Kapitanov et al. (2022) HaGRID. WACV pp.4186-4195.
@@ -97,7 +95,7 @@ GESTURE_COMMANDS: Dict[str, str] = {
     "pointing":    "BACKWARD",
 }
 
-# ROS2 Twist velocity profiles — tuned for TurtleBot3 Burger in Gazebo
+# ROS2 Twist velocity profiles - tuned for TurtleBot3 Burger in Gazebo
 # linear.x in m/s, angular.z in rad/s
 ROS_VELOCITY_PROFILES: Dict[str, Dict[str, float]] = {
     "FORWARD":  {"linear_x":  0.30, "angular_z":  0.00},
@@ -107,7 +105,7 @@ ROS_VELOCITY_PROFILES: Dict[str, Dict[str, float]] = {
     "STOP":     {"linear_x":  0.00, "angular_z":  0.00},
 }
 
-# ── MediaPipe landmark indices ─────────────────────────────────────────────────
+# -- MediaPipe landmark indices ------------------------------------------------
 # Hand skeleton topology (MediaPipe canonical model):
 #
 #   0 = WRIST
@@ -124,7 +122,7 @@ MIDDLE_MCP = 9;  MIDDLE_PIP = 10; MIDDLE_DIP = 11; MIDDLE_TIP = 12
 RING_MCP   = 13; RING_PIP   = 14; RING_DIP   = 15; RING_TIP   = 16
 PINKY_MCP  = 17; PINKY_PIP  = 18; PINKY_DIP  = 19; PINKY_TIP  = 20
 
-# (tip, pip, dip) triples for index through pinky — used in dual-joint check
+# (tip, pip, dip) triples for index through pinky - used in dual-joint check
 _FINGER_TRIPLES: List[Tuple[int, int, int]] = [
     (INDEX_TIP,  INDEX_PIP,  INDEX_DIP),
     (MIDDLE_TIP, MIDDLE_PIP, MIDDLE_DIP),
@@ -194,7 +192,7 @@ class HandAnalysis:
     Attributes
     ----------
     landmarks      : (21, 3) float32 array of normalised [x, y, z] coords
-    finger_states  : bool[5] — [thumb, index, middle, ring, pinky] extended
+    finger_states  : bool[5] - [thumb, index, middle, ring, pinky] extended
     extended_count : total number of extended fingers (0-5)
     thumb_up       : True when thumb tip is clearly above knuckle row
     thumb_ip_angle : IP joint flexion angle in degrees (used for fist/thumbs_up)
@@ -246,8 +244,8 @@ class RuleBasedClassifier:
 
     Parameters
     ----------
-    min_detection_confidence : float — minimum hand detection confidence
-    min_tracking_confidence  : float — minimum tracking confidence
+    min_detection_confidence : float - minimum hand detection confidence
+    min_tracking_confidence  : float - minimum tracking confidence
     """
 
     # IP angle threshold separating thumbs_up from closed_fist
@@ -286,7 +284,7 @@ class RuleBasedClassifier:
             f"track={min_tracking_confidence})"
         )
 
-    # ── Public API ─────────────────────────────────────────────────────────────
+    # Public API
 
     def process_frame(
         self, frame: np.ndarray
@@ -317,7 +315,7 @@ class RuleBasedClassifier:
         if not result.hand_landmarks:
             cv2.putText(
                 annotated,
-                "No hand detected — position hand in frame",
+                "No hand detected - position hand in frame",
                 (12, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.60, _RED, 2, cv2.LINE_AA,
             )
             return None, annotated
@@ -400,7 +398,7 @@ class RuleBasedClassifier:
         self._landmarker.close()
         logger.info("RuleBasedClassifier closed.")
 
-    # ── Private: geometry ──────────────────────────────────────────────────────
+    # Private: geometry
 
     def _finger_states(self, lm: np.ndarray, hand_w: float) -> List[bool]:
         """
@@ -415,13 +413,13 @@ class RuleBasedClassifier:
         The dual-joint condition prevents misclassification from hand
         curvature placing the tip marginally above only the PIP joint.
         """
-        # Thumb — lateral x-axis check
+        # Thumb - lateral x-axis check
         thumb_ext = (
             abs(lm[THUMB_TIP, 0] - lm[WRIST, 0]) >
             abs(lm[THUMB_MCP, 0] - lm[WRIST, 0]) * 1.3
         )
 
-        # Index through pinky — dual-joint y-axis check
+        # Index through pinky - dual-joint y-axis check
         finger_ext = [
             float(lm[tip, 1]) < float(lm[pip, 1]) and
             float(lm[tip, 1]) < float(lm[dip, 1])
@@ -485,7 +483,7 @@ class RuleBasedClassifier:
             "thumb_ip":   self._thumb_ip_angle(lm),
         }
 
-    # ── Private: classification rules ─────────────────────────────────────────
+    # Private: classification rules
 
     def _classify(self, a: HandAnalysis) -> Tuple[Optional[str], float]:
         """
@@ -496,7 +494,7 @@ class RuleBasedClassifier:
 
         Priority order:
           1. open_hand   (4+ fingers extended)
-          2. open_hand   (3 fingers — robust to little finger occlusion)
+          2. open_hand   (3 fingers - robust to little finger occlusion)
           3. peace_sign  (index + middle only)
           4. pointing    (index only)
           5. thumbs_up   (no main fingers, IP angle > 150 deg)
@@ -538,7 +536,7 @@ class RuleBasedClassifier:
             else:
                 return "closed_fist", 0.91
 
-        # Ambiguous pose — no rule matched cleanly
+        # Ambiguous pose - no rule matched cleanly
         logger.debug(
             f"Ambiguous: fingers={a.finger_states}, "
             f"ip_angle={a.thumb_ip_angle:.1f}, "
@@ -582,7 +580,7 @@ class CNNClassifier:
         self.model_path = model_path
         self.model      = self._load_or_build(model_path)
 
-    # ── Public API ─────────────────────────────────────────────────────────────
+    # Public API
 
     def preprocess(self, frame_bgr: np.ndarray) -> np.ndarray:
         """
@@ -629,7 +627,7 @@ class CNNClassifier:
             self.model.save(path)
             logger.info(f"CNNClassifier saved -> {path}")
 
-    # ── Private ────────────────────────────────────────────────────────────────
+    # Private
 
     def _load_or_build(self, model_path: Optional[str]):
         try:
@@ -665,11 +663,11 @@ class CNNClassifier:
                 loss="categorical_crossentropy",
                 metrics=["accuracy"],
             )
-            logger.info(f"CNNClassifier: built — {model.count_params():,} params")
+            logger.info(f"CNNClassifier: built - {model.count_params():,} params")
             return model
 
         except ImportError:
-            logger.warning("TensorFlow not installed — CNNClassifier.model is None.")
+            logger.warning("TensorFlow not installed - CNNClassifier.model is None.")
             return None
         except Exception as exc:
             logger.error(f"CNNClassifier build error: {exc}")
@@ -772,7 +770,7 @@ class TemporalSmoother:
 
     @property
     def buffer_fill(self) -> float:
-        """Buffer fill ratio [0, 1] — used by dashboard warm-up indicator."""
+        """Buffer fill ratio [0, 1] - used by dashboard warm-up indicator."""
         return len(self._buffer) / self.window
 
 
@@ -813,7 +811,7 @@ class ROSPublisher:
             self._available = True
             logger.info(f"ROSPublisher: active on {topic}")
         except ImportError:
-            logger.info("ROSPublisher: ROS not available — simulation mode.")
+            logger.info("ROSPublisher: ROS not available - simulation mode.")
         except Exception as exc:
             logger.warning(f"ROSPublisher init error: {exc}")
 

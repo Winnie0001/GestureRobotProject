@@ -122,7 +122,7 @@ def train_model(dataset_dir: str = "data/hagrid", output_model: str = "models/ge
     # Save model
     Path(output_model).parent.mkdir(parents=True, exist_ok=True)
     model.save(output_model)
-    print(f"\n✓ Model saved to {output_model}")
+    print(f"\nModel saved to {output_model}")
 
     # Evaluation
     print("\n" + "="*60)
@@ -180,7 +180,7 @@ def train_model(dataset_dir: str = "data/hagrid", output_model: str = "models/ge
 
     plt.tight_layout()
     plt.savefig('models/training_history.png', dpi=150)
-    print("\n✓ Training history saved to models/training_history.png")
+    print("\nTraining history saved to models/training_history.png")
 
     return model
 

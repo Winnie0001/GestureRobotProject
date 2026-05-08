@@ -12,10 +12,10 @@ def check_dependency(name, import_name=None):
         import_name = name
     try:
         __import__(import_name)
-        print(f"✓ {name:20} OK")
+        print(f"[OK] {name:20}")
         return True
     except ImportError as e:
-        print(f"✗ {name:20} MISSING: {e}")
+        print(f"[MISSING] {name:20}: {e}")
         return False
 
 
@@ -42,7 +42,7 @@ def main():
 
     print("\n" + "="*60)
     if all(results):
-        print("✓ All dependencies installed!")
+        print("[OK] All dependencies installed")
         print("="*60)
 
         # Try importing project modules
@@ -51,22 +51,22 @@ def main():
             from gesture_classifier import (
                 RuleBasedClassifier, CNNClassifier, TemporalSmoother
             )
-            print("✓ gesture_classifier.py")
+            print("[OK] gesture_classifier.py")
 
             from dataset_prep import HaGRIDDatasetPrep
-            print("✓ dataset_prep.py")
+            print("[OK] dataset_prep.py")
 
             print("\n" + "="*60)
-            print("✓ READY TO START!")
+            print("READY")
             print("="*60)
-            print("\n→ Run: python realtime_inference.py --mode rule")
-            print("→ Press SPACE to toggle mouse control, Q to quit")
+            print("\n-> Run: python realtime_inference.py --mode rule")
+            print("-> Press SPACE to toggle mouse control, Q to quit")
             return 0
         except ImportError as e:
-            print(f"✗ Project module error: {e}")
+            print(f"[ERROR] Project module error: {e}")
             return 1
     else:
-        print("✗ Some dependencies missing")
+        print("[ERROR] Some dependencies are missing")
         print("="*60)
         print("\nInstall with: pip install -r requirements.txt")
         return 1

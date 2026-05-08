@@ -157,7 +157,7 @@ class GesturePublisherNode:
 
             # Log if gesture changed
             if stable_gesture != self.last_gesture:
-                rospy.loginfo(f"Gesture: {stable_gesture} → Command: {command}")
+                rospy.loginfo(f"Gesture: {stable_gesture} -> Command: {command}")
                 self.last_gesture = stable_gesture
         else:
             self._no_stable_frames += 1

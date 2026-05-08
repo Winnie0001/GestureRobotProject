@@ -1,33 +1,31 @@
 """
-╔══════════════════════════════════════════════════════════════════════════════╗
-║          AI-Powered Gesture Control for Robot Navigation                     ║
-║          Project: BA-25-1058  |  Student: Mmesoma Kenneth (202307951)        ║
-║          University of Hull   |  Honours Stage Project                       ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+AI-Powered Gesture Control for Robot Navigation
+Project: BA-25-1058 | Student: Mmesoma Kenneth (202307951)
+University of Hull | Honours Stage Project
 
 gesture_classifier.py
-─────────────────────
+--------------------
 Core classification module using the MediaPipe Tasks API (0.10.30+).
 
-  1. RuleBasedClassifier  — MediaPipe HandLandmarker in VIDEO mode.
+  1. RuleBasedClassifier  - MediaPipe HandLandmarker in VIDEO mode.
                             VIDEO mode gives temporal context across frames,
                             eliminating skeleton flicker and the NORM_RECT
                             warning seen with IMAGE mode.
 
-  2. CNNClassifier        — MobileNetV2 transfer-learning wrapper.
+  2. CNNClassifier        - MobileNetV2 transfer-learning wrapper.
 
-  3. TemporalSmoother     — Recency-weighted majority vote + debounce.
+  3. TemporalSmoother     - Recency-weighted majority vote + debounce.
 
-Gesture → Robot Command Mapping
-────────────────────────────────
-  closed_fist  →  STOP
-  open_hand    →  FORWARD
-  thumbs_up    →  LEFT
-  peace_sign   →  RIGHT
-  pointing     →  BACKWARD
+Gesture -> Robot Command Mapping
+--------------------------------
+  closed_fist  ->  STOP
+  open_hand    ->  FORWARD
+  thumbs_up    ->  LEFT
+  peace_sign   ->  RIGHT
+  pointing     ->  BACKWARD
 
 References
-──────────
+----------
   Zhang et al. (2020) MediaPipe Hands. CVPR Workshops.
   Howard et al. (2017) MobileNets. arXiv:1704.04861.
   Kapitanov et al. (2022) HaGRID. WACV pp.4186-4195.
@@ -147,12 +145,12 @@ class HandAnalysis:
     """
     Full anatomical analysis of a detected hand from 21 MediaPipe landmarks.
 
-    finger_states : bool[5] — [thumb, index, middle, ring, pinky] extended
-    extended_count: int     — total extended fingers
-    thumb_up      : bool    — thumb tip is above wrist
-    raw_gesture   : str     — classified gesture label or None
-    confidence    : float   — heuristic confidence [0, 1]
-    joint_angles  : dict    — named joint flexion angles in degrees
+    finger_states : bool[5] - [thumb, index, middle, ring, pinky] extended
+    extended_count: int     - total extended fingers
+    thumb_up      : bool    - thumb tip is above wrist
+    raw_gesture   : str     - classified gesture label or None
+    confidence    : float   - heuristic confidence [0, 1]
+    joint_angles  : dict    - named joint flexion angles in degrees
     """
     landmarks:      np.ndarray
     finger_states:  List[bool]       = field(default_factory=list)
@@ -179,7 +177,7 @@ class RuleBasedClassifier:
       - Improves tracking continuity when the hand moves
 
     Finger extension model
-    ──────────────────────
+    ----------------------
     Extended when tip.y < pip.y in image space (y increases downward).
     Thumb uses x-axis lateral displacement from wrist, scaled by hand width.
     """
@@ -221,8 +219,7 @@ class RuleBasedClassifier:
             f"track={min_tracking_confidence})"
         )
 
-    # ── Public API ─────────────────────────────────────────────────────────────
-
+    # Public API
     def process_frame(
         self, frame: np.ndarray
     ) -> Tuple[Optional[np.ndarray], np.ndarray]:
@@ -230,14 +227,14 @@ class RuleBasedClassifier:
         Run MediaPipe HandLandmarker on a BGR webcam frame.
 
         Returns
-        ───────
+        -------
         landmarks : (21, 3) float32 array of normalised [x, y, z], or None
         annotated : BGR frame with skeleton and landmark dots drawn
         """
         annotated = frame.copy()
         h, w      = frame.shape[:2]
 
-        # BGR → RGB → MediaPipe Image
+        # BGR -> RGB -> MediaPipe Image
         rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_img = self._mp.Image(
             image_format=self._mp.ImageFormat.SRGB, data=rgb
@@ -250,7 +247,7 @@ class RuleBasedClassifier:
         if not result.hand_landmarks:
             cv2.putText(
                 annotated,
-                "No hand detected — show hand to camera",
+                "No hand detected - show hand to camera",
                 (12, 36), cv2.FONT_HERSHEY_SIMPLEX,
                 0.60, _RED, 2, cv2.LINE_AA,
             )
@@ -304,7 +301,7 @@ class RuleBasedClassifier:
         return a
 
     def classify(self, landmarks: Optional[np.ndarray]) -> Optional[str]:
-        """Convenience wrapper — returns gesture label or None."""
+        """Convenience wrapper - returns gesture label or None."""
         if landmarks is None:
             return None
         return self.analyse(landmarks).raw_gesture
@@ -313,8 +310,7 @@ class RuleBasedClassifier:
         self._landmarker.close()
         logger.info("RuleBasedClassifier closed.")
 
-    # ── Private: geometry ──────────────────────────────────────────────────────
-
+    # Private: geometry
     def _finger_states(self, lm: np.ndarray, hand_w: float) -> List[bool]:
         """
         [thumb, index, middle, ring, pinky] extension states.
@@ -331,8 +327,7 @@ class RuleBasedClassifier:
             abs(lm[THUMB_MCP, 0] - lm[WRIST, 0]) * 1.3
         )
 
-        # Index → Pinky: BOTH tip above pip AND tip above dip
-        # DIP indices: 7=index_dip, 11=middle_dip, 15=ring_dip, 19=pinky_dip
+        # Index through pinky - dual-joint y-axis check
         finger_pairs_with_dip = [
             (INDEX_TIP,  INDEX_PIP,  INDEX_DIP),
             (MIDDLE_TIP, MIDDLE_PIP, MIDDLE_DIP),
@@ -380,7 +375,7 @@ class RuleBasedClassifier:
             "thumb_ip":   angle(THUMB_MCP,  THUMB_IP,   THUMB_TIP),
         }
 
-    # ── Private: classification rules ─────────────────────────────────────────
+    # Private: classification rules
 
     def _classify(self, a: HandAnalysis) -> Tuple[Optional[str], float]:
         """
@@ -388,7 +383,7 @@ class RuleBasedClassifier:
 
         Key design decisions:
         - thumbs_up checked BEFORE closed_fist because both have no extended
-          fingers — thumb_up flag differentiates them
+          fingers - thumb_up flag differentiates them
         - open_hand requires at least 3 of 4 fingers to be robust to
           partial occlusion of pinky
         - DIP+PIP dual check in _finger_states prevents closed fist from
@@ -402,28 +397,28 @@ class RuleBasedClassifier:
 
         fingers_up = sum([index, middle, ring, pinky])
 
-        # thumbs_up — MUST check before closed_fist
+        # thumbs_up - MUST check before closed_fist
         # Thumb clearly pointing up, all four fingers curled
         if a.thumb_up and not index and not middle and not ring and not pinky:
             return "thumbs_up", 0.93
 
-        # open_hand — all four main fingers extended (thumb optional)
+        # open_hand - all four main fingers extended (thumb optional)
         if index and middle and ring and pinky:
             return "open_hand", 0.95 if thumb else 0.88
 
-        # open_hand — 3 of 4 fingers extended (robust to pinky occlusion)
+        # open_hand - 3 of 4 fingers extended (robust to pinky occlusion)
         if fingers_up == 3 and (index and middle and ring):
             return "open_hand", 0.80
 
-        # peace_sign — index + middle only
+        # peace_sign - index + middle only
         if index and middle and not ring and not pinky:
             return "peace_sign", 0.92
 
-        # pointing — index only
+        # pointing - index only
         if index and not middle and not ring and not pinky:
             return "pointing", 0.90
 
-        # closed_fist — no main fingers extended
+        # closed_fist - no main fingers extended
         if not index and not middle and not ring and not pinky:
             return "closed_fist", 0.91
 
@@ -448,7 +443,7 @@ class CNNClassifier:
         self.model      = self._load_or_build(model_path)
 
     def preprocess(self, frame_bgr: np.ndarray) -> np.ndarray:
-        """BGR frame → (1, 224, 224, 3) float32 tensor, values in [0, 1]."""
+        """BGR frame -> (1, 224, 224, 3) float32 tensor, values in [0, 1]."""
         img = cv2.resize(frame_bgr, self.IMG_SIZE, interpolation=cv2.INTER_AREA)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = img.astype(np.float32) / 255.0
@@ -471,7 +466,7 @@ class CNNClassifier:
     def save(self, path: str) -> None:
         if self.model is not None:
             self.model.save(path)
-            logger.info(f"CNNClassifier saved → {path}")
+            logger.info(f"CNNClassifier saved -> {path}")
 
     def _load_or_build(self, model_path: Optional[str]):
         try:
@@ -504,11 +499,11 @@ class CNNClassifier:
                 loss="categorical_crossentropy",
                 metrics=["accuracy"],
             )
-            logger.info(f"CNNClassifier built — {model.count_params():,} params")
+            logger.info(f"CNNClassifier built - {model.count_params():,} params")
             return model
 
         except ImportError:
-            logger.warning("TensorFlow not installed — CNNClassifier.model is None.")
+            logger.warning("TensorFlow not installed - CNNClassifier.model is None.")
             return None
         except Exception as exc:
             logger.error(f"CNNClassifier build error: {exc}")
@@ -582,15 +577,15 @@ class TemporalSmoother:
 
 class ROSPublisher:
     """
-    Optional ROS integration — publishes geometry_msgs/Twist to /cmd_vel.
+    Optional ROS integration - publishes geometry_msgs/Twist to /cmd_vel.
     Degrades gracefully to no-op when ROS is not installed (e.g. on Windows).
 
     ROS Twist mapping:
-      FORWARD  → linear.x  = +0.30 m/s
-      BACKWARD → linear.x  = -0.20 m/s
-      LEFT     → angular.z = +0.50 rad/s
-      RIGHT    → angular.z = -0.50 rad/s
-      STOP     → all zero
+      FORWARD  -> linear.x  = +0.30 m/s
+      BACKWARD -> linear.x  = -0.20 m/s
+      LEFT     -> angular.z = +0.50 rad/s
+      RIGHT    -> angular.z = -0.50 rad/s
+      STOP     -> all zero
     """
 
     def __init__(self, node_name: str = "gesture_controller",
@@ -607,7 +602,7 @@ class ROSPublisher:
             self._available = True
             logger.info(f"ROSPublisher active on {topic}")
         except ImportError:
-            logger.info("ROSPublisher: ROS not available — simulation mode.")
+            logger.info("ROSPublisher: ROS not available - simulation mode.")
         except Exception as exc:
             logger.warning(f"ROSPublisher init error: {exc}")
 
@@ -635,18 +630,18 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
     print("\n" + "═" * 58)
-    print("  gesture_classifier.py — self test")
+    print("  gesture_classifier.py - self test")
     print("═" * 58)
 
     print("\n[1] RuleBasedClassifier...")
     clf = RuleBasedClassifier()
-    print("    ✓")
+    print("    OK")
 
-    print("\n[2] Dummy frame (blank — no hand expected)...")
+    print("\n[2] Dummy frame (blank - no hand expected)...")
     dummy = np.zeros((480, 640, 3), dtype=np.uint8)
     lm, ann = clf.process_frame(dummy)
     assert ann.shape == (480, 640, 3)
-    print(f"    ✓  landmarks={'detected' if lm is not None else 'none (expected)'}")
+    print(f"    OK  landmarks={'detected' if lm is not None else 'none (expected)'}")
 
     print("\n[3] CNN preprocessing...")
     cnn  = CNNClassifier()
@@ -654,7 +649,7 @@ if __name__ == "__main__":
     t    = cnn.preprocess(rand)
     assert t.shape == (1, 224, 224, 3)
     assert 0.0 <= t.min() and t.max() <= 1.0
-    print(f"    ✓  shape={t.shape}")
+    print(f"    OK  shape={t.shape}")
 
     print("\n[4] Temporal smoother...")
     sm = TemporalSmoother(window=7, debounce_s=0.8)
@@ -663,7 +658,7 @@ if __name__ == "__main__":
         sm.update("open_hand")
     r = sm.update("open_hand")
     assert r == "open_hand", f"Got {r}"
-    print(f"    ✓  majority vote → '{r}'")
+    print(f"    OK  majority vote -> '{r}'")
 
     print("\n[5] Constants...")
     assert len(GESTURE_LABELS) == 5
@@ -672,10 +667,10 @@ if __name__ == "__main__":
     assert GESTURE_COMMANDS["closed_fist"] == "STOP"
     assert GESTURE_COMMANDS["open_hand"]   == "FORWARD"
     assert GESTURE_COMMANDS["thumbs_up"]   == "LEFT"
-    print(f"    ✓  {len(GESTURE_LABELS)} labels, {len(GESTURE_COMMANDS)} commands")
+    print(f"    OK  {len(GESTURE_LABELS)} labels, {len(GESTURE_COMMANDS)} commands")
 
     clf.close()
     print("\n" + "═" * 58)
-    print("  All tests passed ✓")
+    print("  All tests passed")
     print("═" * 58 + "\n")
     sys.exit(0)

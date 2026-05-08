@@ -18,10 +18,10 @@ from gesture_classifier import (
     GESTURE_COMMANDS,
 )
 
-# ── Logging ────────────────────────────────────────────────────────────────────
+# -- Logging -------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
 )
 logger = logging.getLogger("ros_bridge")
 
@@ -49,7 +49,7 @@ class TwistCommand:
         )
 
 
-# Velocity lookup table — tuned for TurtleBot3 in Gazebo
+# Velocity lookup table - tuned for TurtleBot3 in Gazebo
 VELOCITY_TABLE: Dict[str, TwistCommand] = {
     "STOP":     TwistCommand( 0.00,  0.00, "STOP"),
     "FORWARD":  TwistCommand( 0.30,  0.00, "FORWARD"),
@@ -111,7 +111,7 @@ class CommandLogger:
         ]
         for cmd, n in sorted(counts.items(), key=lambda x: -x[1]):
             pct = n / len(self._records) * 100
-            bar = "█" * int(pct / 5)
+            bar = "#" * int(pct / 5)
             lines.append(f"    {cmd:12} {bar:20} {n:4}x  ({pct:.1f}%)")
 
         lines.append(f"{'═'*50}")
@@ -125,7 +125,7 @@ class CommandLogger:
                     f"{r.timestamp:.3f},{r.gesture},{r.command},"
                     f"{r.linear_x:.3f},{r.angular_z:.3f}\n"
                 )
-        logger.info(f"Command log exported → {path}")
+        logger.info(f"Command log exported -> {path}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -137,10 +137,10 @@ class SafetyMonitor:
     Safety layer between the gesture classifier and robot actuators.
 
     Implements two safety mechanisms:
-    1. Confidence threshold — commands are blocked if classifier confidence
+    1. Confidence threshold - commands are blocked if classifier confidence
        is below the threshold, issuing STOP instead. Prevents low-confidence
        spurious movements.
-    2. Consecutive NONE gate — if the classifier returns no gesture for
+    2. Consecutive NONE gate - if the classifier returns no gesture for
        max_none_frames consecutive frames, STOP is issued. Prevents the
        robot continuing to move when the operator's hand leaves the frame.
 
@@ -262,14 +262,14 @@ class ROSBridge:
 
         except ImportError:
             logger.info(
-                "ROSBridge: ROS not installed — running in SIMULATION mode.\n"
+                "ROSBridge: ROS not installed - running in SIMULATION mode.\n"
                 "  To run with ROS: Ubuntu + ROS Noetic + roscore\n"
                 "  All commands will be printed to console."
             )
         except Exception as exc:
-            logger.warning(f"ROSBridge init error: {exc} — simulation mode.")
+            logger.warning(f"ROSBridge init error: {exc} - simulation mode.")
 
-    # ── Public API ─────────────────────────────────────────────────────────────
+    # -- Public API -------------------------------------------------------------
 
     def publish(self, twist: TwistCommand) -> None:
         """Publish a TwistCommand to /cmd_vel (or print in simulation mode)."""
@@ -279,9 +279,9 @@ class ROSBridge:
             msg.angular.z = twist.angular_z
             self._pub_twist.publish(msg)
         else:
-            # Simulation mode — structured console output
+            # Simulation mode - structured console output
             ts = time.strftime("%H:%M:%S")
-            print(f"  [{ts}] /cmd_vel  →  {twist}")
+            print(f"  [{ts}] /cmd_vel  ->  {twist}")
 
     def publish_label(self, gesture: str) -> None:
         """Publish gesture label string to /gesture_command."""
@@ -328,7 +328,7 @@ def run_bridge(
         confidence_threshold : minimum confidence to issue a command
         simulate             : force simulation mode even if ROS available
     """
-    # ── Initialise components ─────────────────────────────────────────────────
+    # -- Initialise components -------------------------------------------------
     logger.info("Initialising gesture recognition pipeline...")
     classifier = RuleBasedClassifier()
     smoother   = TemporalSmoother(window=7, debounce_s=0.5)
@@ -338,7 +338,7 @@ def run_bridge(
 
     logger.info(f"Mode: {bridge.mode}")
 
-    # ── Open webcam ───────────────────────────────────────────────────────────
+    # -- Open webcam -----------------------------------------------------------
     cap = cv2.VideoCapture(camera_idx)
     if not cap.isOpened():
         logger.error(f"Cannot open camera {camera_idx}")
@@ -350,7 +350,7 @@ def run_bridge(
     cap.set(cv2.CAP_PROP_BUFFERSIZE,     1)
 
     print(f"\n{'═'*55}")
-    print(f"  GESTURE → ROS BRIDGE  |  {bridge.mode} MODE")
+    print(f"  GESTURE -> ROS BRIDGE  |  {bridge.mode} MODE")
     print(f"{'═'*55}")
     print(f"  Confidence threshold : {confidence_threshold:.0%}")
     print(f"  Safety none-frames   : {safety.max_none_frames}")
@@ -371,7 +371,7 @@ def run_bridge(
 
             frame = cv2.flip(frame, 1)
 
-            # ── Classify ──────────────────────────────────────────────────────
+            # -- Classify ------------------------------------------------------
             landmarks, annotated = classifier.process_frame(frame)
             analysis = classifier.analyse(landmarks) if landmarks is not None else None
 
@@ -381,30 +381,30 @@ def run_bridge(
 
             raw_command  = GESTURE_COMMANDS.get(stable, None) if stable else None
 
-            # ── Safety check ──────────────────────────────────────────────────
+            # -- Safety check --------------------------------------------------
             safe_command, overridden = safety.check(stable, raw_command, raw_conf)
             twist = VELOCITY_TABLE.get(safe_command, VELOCITY_TABLE["STOP"])
 
-            # ── Publish ───────────────────────────────────────────────────────
+            # -- Publish -------------------------------------------------------
             bridge.publish(twist)
             if stable:
                 bridge.publish_label(stable)
                 cmd_log.log(stable, safe_command, twist)
 
-            # ── Console log (on change) ────────────────────────────────────────
+            # -- Console log (on change) --------------------------------------
             if safe_command != last_command:
                 override_tag = " [SAFETY OVERRIDE]" if overridden else ""
                 print(f"  {twist}{override_tag}")
                 last_command = safe_command
 
-            # ── Annotate frame ────────────────────────────────────────────────
+            # -- Annotate frame ------------------------------------------------
             _draw_bridge_hud(
                 annotated, stable, raw_conf, safe_command,
                 twist, overridden, bridge.mode,
                 safety.block_rate, fps_times,
             )
-
-            cv2.imshow(f"ROS Bridge — {bridge.mode}", annotated)
+# ... 
+            cv2.imshow(f"ROS Bridge - {bridge.mode}", annotated)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
@@ -495,34 +495,31 @@ def _draw_bridge_hud(
 # ══════════════════════════════════════════════════════════════════════════════
 
 GAZEBO_INSTRUCTIONS = """
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  HOW TO RUN WITH GAZEBO (Ubuntu + ROS Noetic)                                ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║                                                                              ║
-║  1. Install ROS Noetic:                                                      ║
-║     sudo apt install ros-noetic-desktop-full                                 ║
-║     echo "source /opt/ros/noetic/setup.bash" >> ~/.bashrc                   ║
-║                                                                              ║
-║  2. Install TurtleBot3:                                                      ║
-║     sudo apt install ros-noetic-turtlebot3 ros-noetic-turtlebot3-simulations ║
-║     echo "export TURTLEBOT3_MODEL=burger" >> ~/.bashrc                       ║
-║                                                                              ║
-║  3. Create workspace:                                                        ║
-║     mkdir -p ~/catkin_ws/src && cd ~/catkin_ws && catkin_make                ║
-║     source devel/setup.bash                                                  ║
-║                                                                              ║
-║  4. Launch everything (4 terminals):                                         ║
-║     Terminal 1: roscore                                                      ║
-║     Terminal 2: roslaunch turtlebot3_gazebo turtlebot3_world.launch          ║
-║     Terminal 3: python3 ros_bridge.py                                        ║
-║     Terminal 4: rostopic echo /cmd_vel   (to verify messages)                ║
-║                                                                              ║
-║  5. Verify gesture commands reach the robot:                                 ║
-║     rostopic echo /gesture_command                                           ║
-║     rostopic echo /cmd_vel                                                   ║
-║                                                                              ║
-║  The TurtleBot3 in Gazebo will respond to your hand gestures in real time.  ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+HOW TO RUN WITH GAZEBO (Ubuntu + ROS Noetic)
+
+1. Install ROS Noetic:
+   sudo apt install ros-noetic-desktop-full
+   echo "source /opt/ros/noetic/setup.bash" >> ~/.bashrc
+
+2. Install TurtleBot3:
+   sudo apt install ros-noetic-turtlebot3 ros-noetic-turtlebot3-simulations
+   echo "export TURTLEBOT3_MODEL=burger" >> ~/.bashrc
+
+3. Create workspace:
+   mkdir -p ~/catkin_ws/src && cd ~/catkin_ws && catkin_make
+   source devel/setup.bash
+
+4. Launch everything (4 terminals):
+   Terminal 1: roscore
+   Terminal 2: roslaunch turtlebot3_gazebo turtlebot3_world.launch
+   Terminal 3: python3 ros_bridge.py
+   Terminal 4: rostopic echo /cmd_vel   (to verify messages)
+
+5. Verify gesture commands reach the robot:
+   rostopic echo /gesture_command
+   rostopic echo /cmd_vel
+
+The TurtleBot3 in Gazebo will respond to your hand gestures in real time.
 """
 
 
@@ -532,7 +529,7 @@ GAZEBO_INSTRUCTIONS = """
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Gesture → ROS Bridge for robot navigation",
+        description="Gesture -> ROS Bridge for robot navigation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Example: python ros_bridge.py --confidence 0.75"
     )

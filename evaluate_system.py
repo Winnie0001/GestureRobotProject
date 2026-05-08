@@ -38,7 +38,7 @@ class GestureEvaluator:
             min_detection_confidence=0.6,   # slightly lower for evaluation
             min_tracking_confidence=0.5,
         )
-        # Shorter debounce for evaluation — we want more samples
+        # Shorter debounce for evaluation - we want more samples
         self.smoother = TemporalSmoother(window=5, debounce_s=0.3)
 
         self.results = {
@@ -48,7 +48,7 @@ class GestureEvaluator:
             'latencies':        [],   # only hand-detected frames
         }
 
-    # ── Per-gesture test ───────────────────────────────────────────────────────
+    # -- Per-gesture test -------------------------------------------------------
 
     def interactive_test(self, gesture_name: str, duration_s: int = 8):
         """
@@ -175,17 +175,17 @@ class GestureEvaluator:
             print(f"\n[WARNING] No detections for {gesture_name}")
             print(f"  Tips: ensure good lighting, hand centred, fingers clearly visible")
 
-    # ── Full evaluation run ────────────────────────────────────────────────────
+    # -- Full evaluation run ----------------------------------------------------
 
     def run_full_evaluation(self):
         """Test all 5 gestures in sequence then generate report."""
         print("\n" + "="*60)
-        print("  GESTURE RECOGNITION SYSTEM — FULL EVALUATION")
+        print("  GESTURE RECOGNITION SYSTEM - FULL EVALUATION")
         print("  Project: BA-25-1058 | Mmesoma Kenneth (202307951)")
         print("="*60)
         print("\nInstructions:")
         print("  1. Press Enter when ready for each gesture")
-        print("  2. A 2-second countdown appears — get your hand ready")
+        print("  2. A 2-second countdown appears - get your hand ready")
         print("  3. Hold the gesture clearly for 8 seconds")
         print("  4. Good lighting + plain background = better results")
         print("  5. Press Q on the camera window to skip a gesture")
@@ -196,16 +196,16 @@ class GestureEvaluator:
             self.interactive_test(gesture, duration_s=8)
 
         print("\n" + "="*60)
-        print("  All gestures tested — generating report...")
+        print("  All gestures tested - generating report...")
         print("="*60)
         self.generate_report()
 
-    # ── Report generation ──────────────────────────────────────────────────────
+    # -- Report generation ------------------------------------------------------
 
     def generate_report(self):
         """Compute and print full evaluation metrics."""
         if not self.results['true_labels']:
-            print("[ERROR] No data collected — ensure hand is visible during tests")
+            print("[ERROR] No data collected - ensure hand is visible during tests")
             return
 
         true = self.results['true_labels']
@@ -225,7 +225,7 @@ class GestureEvaluator:
         avg_conf    = float(np.mean(self.results['confidences'])) \
                       if self.results['confidences'] else 0.0
 
-        # ── Console report ─────────────────────────────────────────────────────
+        # -- Console report -----------------------------------------------------
         print("\n" + "="*70)
         print("  EVALUATION REPORT")
         print("="*70)
@@ -250,10 +250,10 @@ class GestureEvaluator:
             if mask.sum() > 0:
                 correct = (np.array(pred)[mask] == gesture).sum()
                 pct     = correct / mask.sum() * 100
-                bar     = '█' * int(pct / 5)
+                bar     = '#' * int(pct / 5)
                 print(f"    {gesture:15} {bar:20} {pct:5.1f}%  (n={mask.sum()})")
             else:
-                print(f"    {gesture:15} {'—':20} No samples")
+                print(f"    {gesture:15} {'-':20} No samples")
 
         print("\n  [CONFUSION MATRIX]  (rows=true, cols=predicted)")
         header = "              " + "".join(f"{g[:7]:>10}" for g in labels)
@@ -262,7 +262,7 @@ class GestureEvaluator:
             row = f"  {g:12}" + "".join(f"{cm[i,j]:>10}" for j in range(len(labels)))
             print(row)
 
-        # ── Save files ─────────────────────────────────────────────────────────
+        # -- Save files ---------------------------------------------------------
         self._save_json(accuracy, precision, recall, f1, cm,
                         avg_latency, avg_fps, avg_conf)
         self._plot_confusion_matrix(cm)
@@ -310,7 +310,7 @@ class GestureEvaluator:
         ax.set_ylabel('True Label', fontsize=12)
         ax.set_xlabel('Predicted Label', fontsize=12)
         ax.set_title(
-            f'Confusion Matrix — Gesture Recognition\n'
+            f'Confusion Matrix - Gesture Recognition\n'
             f'Project BA-25-1058 | Mmesoma Kenneth (202307951)',
             fontsize=11
         )

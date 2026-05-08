@@ -171,7 +171,7 @@ class RuleBasedClassifier:
         if not result.hand_landmarks:
             cv2.putText(
                 annotated,
-                "No hand detected — show hand to camera",
+                "No hand detected - show hand to camera",
                 (12, 36),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.60,
@@ -346,7 +346,7 @@ class CNNClassifier:
             return model
 
         except ImportError:
-            logger.warning("TensorFlow not installed — CNNClassifier.model is None.")
+            logger.warning("TensorFlow not installed - CNNClassifier.model is None.")
             return None
         except Exception as exc:
             logger.error(f"CNNClassifier build error: {exc}")
