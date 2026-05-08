@@ -1,6 +1,4 @@
-"""
-Dataset preparation: HaGRID download and preprocessing.
-"""
+
 
 import os
 import numpy as np

@@ -1,0 +1,77 @@
+<?xml version="1.0"?>
+<!--
+  Gesture Control Robot Navigation Launch File
+
+  Author: Mmesoma Kenneth (202307951)
+  Project: AI-Powered Gesture Control for Robot Navigation (BA-25-1058)
+
+  This launch file starts the gesture recognition system and robot controller.
+
+  Usage:
+    roslaunch gesture_control_ros gesture_control.launch mode:=rule
+    roslaunch gesture_control_ros gesture_control.launch mode:=cnn model:=models/gesture_model.h5
+-->
+<launch>
+  <!-- Arguments -->
+  <arg name="mode" default="rule" doc="Classification mode: rule or cnn"/>
+  <arg name="model" default="$(find gesture_control_ros)/../models/gesture_model.h5" doc="Path to trained CNN model"/>
+  <arg name="rate" default="10" doc="Publishing rate in Hz"/>
+  <arg name="linear_speed" default="0.2" doc="Linear velocity (m/s)"/>
+  <arg name="angular_speed" default="0.5" doc="Angular velocity (rad/s)"/>
+  <arg name="max_no_stable_frames" default="8" doc="Force STOP after N frames without stable gesture"/>
+
+  <!-- Windows webcam bridge mode (WSL workaround) -->
+  <arg name="use_windows_bridge" default="false" doc="If true, listen for commands from a Windows gesture script over TCP instead of using the WSL webcam"/>
+  <arg name="tcp_host" default="0.0.0.0" doc="TCP listen host for tcp_command_bridge"/>
+  <arg name="tcp_port" default="5005" doc="TCP listen port for tcp_command_bridge"/>
+
+  <!-- Robot control mode -->
+  <arg name="control_mode" default="teleop" doc="teleop: /cmd_vel, nav: move_base waypoint goals"/>
+
+  <!-- Waypoints (nav mode) in map frame -->
+  <arg name="wp1_x" default="1.0"/>
+  <arg name="wp1_y" default="0.0"/>
+  <arg name="wp1_yaw" default="0.0"/>
+  <arg name="wp2_x" default="0.0"/>
+  <arg name="wp2_y" default="1.0"/>
+  <arg name="wp2_yaw" default="1.57"/>
+  <arg name="wp3_x" default="-1.0"/>
+  <arg name="wp3_y" default="0.0"/>
+  <arg name="wp3_yaw" default="3.14"/>
+
+  <!-- Gesture Publisher Node -->
+  <node pkg="gesture_control_ros" type="gesture_publisher.py" name="gesture_publisher" output="screen" unless="$(arg use_windows_bridge)">
+    <param name="mode" value="$(arg mode)"/>
+    <param name="model_path" value="$(arg model)" if="$(eval mode == 'cnn')"/>
+    <param name="rate" value="$(arg rate)"/>
+    <param name="linear_speed" value="$(arg linear_speed)"/>
+    <param name="angular_speed" value="$(arg angular_speed)"/>
+    <param name="max_no_stable_frames" value="$(arg max_no_stable_frames)"/>
+  </node>
+
+  <!-- TCP Command Bridge Node (Windows webcam workaround) -->
+  <node pkg="gesture_control_ros" type="tcp_command_bridge.py" name="tcp_command_bridge" output="screen" if="$(arg use_windows_bridge)">
+    <param name="host" value="$(arg tcp_host)"/>
+    <param name="port" value="$(arg tcp_port)"/>
+  </node>
+
+  <!-- Robot Controller Node -->
+  <node pkg="gesture_control_ros" type="robot_controller.py" name="robot_controller" output="screen">
+    <param name="linear_speed" value="$(arg linear_speed)"/>
+    <param name="angular_speed" value="$(arg angular_speed)"/>
+    <param name="control_mode" value="$(arg control_mode)"/>
+    <param name="wp1_x" value="$(arg wp1_x)"/>
+    <param name="wp1_y" value="$(arg wp1_y)"/>
+    <param name="wp1_yaw" value="$(arg wp1_yaw)"/>
+    <param name="wp2_x" value="$(arg wp2_x)"/>
+    <param name="wp2_y" value="$(arg wp2_y)"/>
+    <param name="wp2_yaw" value="$(arg wp2_yaw)"/>
+    <param name="wp3_x" value="$(arg wp3_x)"/>
+    <param name="wp3_y" value="$(arg wp3_y)"/>
+    <param name="wp3_yaw" value="$(arg wp3_yaw)"/>
+  </node>
+
+  <!-- RViz Visualization (optional) -->
+  <!-- <node pkg="rviz" type="rviz" name="rviz" args="-d $(find gesture_control_ros)/config/gesture_control.rviz"/> -->
+
+</launch>

@@ -1,277 +1,681 @@
 """
-AI-Powered Gesture Control for Robot Navigation
-Project: BA-25-1058 | Student: Mmesoma Kenneth | ID: 202307951
+╔══════════════════════════════════════════════════════════════════════════════╗
+║          AI-Powered Gesture Control for Robot Navigation                     ║
+║          Project: BA-25-1058  |  Student: Mmesoma Kenneth (202307951)        ║
+║          University of Hull   |  Honours Stage Project                       ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 
-Simplified Gesture Classifier (works with MediaPipe 0.10.33+)
-Uses hand contour detection via OpenCV for gesture classification.
+gesture_classifier.py
+─────────────────────
+Core classification module using the MediaPipe Tasks API (0.10.30+).
+
+  1. RuleBasedClassifier  — MediaPipe HandLandmarker in VIDEO mode.
+                            VIDEO mode gives temporal context across frames,
+                            eliminating skeleton flicker and the NORM_RECT
+                            warning seen with IMAGE mode.
+
+  2. CNNClassifier        — MobileNetV2 transfer-learning wrapper.
+
+  3. TemporalSmoother     — Recency-weighted majority vote + debounce.
+
+Gesture → Robot Command Mapping
+────────────────────────────────
+  closed_fist  →  STOP
+  open_hand    →  FORWARD
+  thumbs_up    →  LEFT
+  peace_sign   →  RIGHT
+  pointing     →  BACKWARD
+
+References
+──────────
+  Zhang et al. (2020) MediaPipe Hands. CVPR Workshops.
+  Howard et al. (2017) MobileNets. arXiv:1704.04861.
+  Kapitanov et al. (2022) HaGRID. WACV pp.4186-4195.
 """
+
+from __future__ import annotations
+
+import logging
+import math
+import os
+import time
+import urllib.request
+from collections import deque
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
-import time
-from collections import deque, Counter
-from typing import Optional, Tuple, List
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+logger = logging.getLogger(__name__)
 
-GESTURE_LABELS = {
-    0: "closed_fist",
-    1: "open_hand",
-    2: "thumbs_up",
-    3: "peace_sign",
-    4: "pointing",
+# ══════════════════════════════════════════════════════════════════════════════
+# Constants
+# ══════════════════════════════════════════════════════════════════════════════
+
+GESTURE_LABELS: List[str] = [
+    "closed_fist",
+    "open_hand",
+    "thumbs_up",
+    "peace_sign",
+    "pointing",
+]
+
+GESTURE_COMMANDS: Dict[str, str] = {
+    "closed_fist": "STOP",
+    "open_hand":   "FORWARD",
+    "thumbs_up":   "LEFT",
+    "peace_sign":  "RIGHT",
+    "pointing":    "BACKWARD",
 }
 
-GESTURE_COMMANDS = {
-    "closed_fist":  "STOP",
-    "open_hand":    "FORWARD",
-    "thumbs_up":    "LEFT",
-    "peace_sign":   "RIGHT",
-    "pointing":     "BACKWARD",
+ROS_VELOCITY_PROFILES: Dict[str, Dict[str, float]] = {
+    "FORWARD":  {"linear_x":  0.30, "angular_z":  0.00},
+    "BACKWARD": {"linear_x": -0.20, "angular_z":  0.00},
+    "LEFT":     {"linear_x":  0.00, "angular_z":  0.50},
+    "RIGHT":    {"linear_x":  0.00, "angular_z": -0.50},
+    "STOP":     {"linear_x":  0.00, "angular_z":  0.00},
 }
 
+# MediaPipe landmark indices
+WRIST       = 0
+THUMB_CMC   = 1;  THUMB_MCP  = 2;  THUMB_IP   = 3;  THUMB_TIP  = 4
+INDEX_MCP   = 5;  INDEX_PIP  = 6;  INDEX_DIP  = 7;  INDEX_TIP  = 8
+MIDDLE_MCP  = 9;  MIDDLE_PIP = 10; MIDDLE_DIP = 11; MIDDLE_TIP = 12
+RING_MCP    = 13; RING_PIP   = 14; RING_DIP   = 15; RING_TIP   = 16
+PINKY_MCP   = 17; PINKY_PIP  = 18; PINKY_DIP  = 19; PINKY_TIP  = 20
 
-# ── Simplified Rule-Based Classifier ──────────────────────────────────────────
+_FINGER_PAIRS: List[Tuple[int, int]] = [
+    (INDEX_TIP,  INDEX_PIP),
+    (MIDDLE_TIP, MIDDLE_PIP),
+    (RING_TIP,   RING_PIP),
+    (PINKY_TIP,  PINKY_PIP),
+]
+
+# BGR colours
+_GREEN = (0, 210,  80)
+_RED   = (0,  50, 220)
+_CYAN  = (200, 200,  0)
+_AMBER = (0, 170, 240)
+_WHITE = (255, 255, 255)
+
+# Hand landmark model
+_MODEL_URL  = (
+    "https://storage.googleapis.com/mediapipe-models/"
+    "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+)
+_MODEL_PATH = "hand_landmarker.task"
+
+# Hand skeleton connection pairs for manual drawing
+_CONNECTIONS = [
+    (0,1),(1,2),(2,3),(3,4),        # thumb
+    (0,5),(5,6),(6,7),(7,8),         # index
+    (0,9),(9,10),(10,11),(11,12),    # middle
+    (0,13),(13,14),(14,15),(15,16),  # ring
+    (0,17),(17,18),(18,19),(19,20),  # pinky
+    (5,9),(9,13),(13,17),            # palm
+]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Model download
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _ensure_model() -> str:
+    if os.path.exists(_MODEL_PATH):
+        return _MODEL_PATH
+    print(f"[Setup] Downloading hand landmark model (~9 MB)...")
+    print(f"        {_MODEL_URL}")
+    try:
+        urllib.request.urlretrieve(_MODEL_URL, _MODEL_PATH)
+        print(f"[Setup] Saved: {_MODEL_PATH}")
+    except Exception as e:
+        raise RuntimeError(
+            f"Download failed: {e}\n"
+            f"Download manually from:\n  {_MODEL_URL}\n"
+            f"Save as: {_MODEL_PATH}"
+        )
+    return _MODEL_PATH
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Data containers
+# ══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class HandAnalysis:
+    """
+    Full anatomical analysis of a detected hand from 21 MediaPipe landmarks.
+
+    finger_states : bool[5] — [thumb, index, middle, ring, pinky] extended
+    extended_count: int     — total extended fingers
+    thumb_up      : bool    — thumb tip is above wrist
+    raw_gesture   : str     — classified gesture label or None
+    confidence    : float   — heuristic confidence [0, 1]
+    joint_angles  : dict    — named joint flexion angles in degrees
+    """
+    landmarks:      np.ndarray
+    finger_states:  List[bool]       = field(default_factory=list)
+    extended_count: int              = 0
+    thumb_up:       bool             = False
+    raw_gesture:    Optional[str]    = None
+    confidence:     float            = 0.0
+    joint_angles:   Dict[str, float] = field(default_factory=dict)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Rule-Based Classifier
+# ══════════════════════════════════════════════════════════════════════════════
 
 class RuleBasedClassifier:
     """
-    Simplified hand gesture classifier using OpenCV contour detection.
-    Detects hand shape and estimates gesture.
+    Anatomically-grounded hand gesture classifier using the MediaPipe
+    HandLandmarker Tasks API in VIDEO running mode.
+
+    VIDEO mode (vs IMAGE mode) gives the landmarker temporal context across
+    frames, which:
+      - Eliminates skeleton flickering between frames
+      - Fixes the NORM_RECT warning
+      - Improves tracking continuity when the hand moves
+
+    Finger extension model
+    ──────────────────────
+    Extended when tip.y < pip.y in image space (y increases downward).
+    Thumb uses x-axis lateral displacement from wrist, scaled by hand width.
     """
 
-    def __init__(self):
-        # HSV range for skin color (adjust for different skin tones)
-        self.lower_skin = np.array([0, 20, 70], dtype=np.uint8)
-        self.upper_skin = np.array([20, 255, 255], dtype=np.uint8)
+    def __init__(
+        self,
+        min_detection_confidence: float = 0.7,
+        min_tracking_confidence:  float = 0.6,
+    ) -> None:
+        import mediapipe as mp
+        from mediapipe.tasks import python as mp_python
+        from mediapipe.tasks.python import vision as mp_vision
+        from mediapipe.tasks.python.vision import HandLandmarkerOptions
 
-    def _detect_hand(self, frame_hsv: np.ndarray) -> Optional[np.ndarray]:
-        """Detect hand region via skin color."""
-        mask = cv2.inRange(frame_hsv, self.lower_skin, self.upper_skin)
+        self._mp = mp
+        model_path = _ensure_model()
 
-        # Morphological operations to clean up mask
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        base_options = mp_python.BaseOptions(model_asset_path=model_path)
 
-        return mask
+        # KEY FIX: VIDEO mode instead of IMAGE mode.
+        # VIDEO mode uses timestamps to maintain temporal state across frames,
+        # giving smooth, stable tracking instead of flicker.
+        options = HandLandmarkerOptions(
+            base_options=base_options,
+            running_mode=mp_vision.RunningMode.VIDEO,
+            num_hands=1,
+            min_hand_detection_confidence=min_detection_confidence,
+            min_hand_presence_confidence=min_detection_confidence,
+            min_tracking_confidence=min_tracking_confidence,
+        )
+        self._landmarker = mp_vision.HandLandmarker.create_from_options(options)
 
-    def _get_contour_features(self, contour) -> dict:
-        """Extract features from hand contour."""
-        area = cv2.contourArea(contour)
-        if area < 1000:
+        # Monotonic clock for VIDEO mode timestamps
+        self._t0 = time.monotonic()
+
+        logger.info(
+            "RuleBasedClassifier ready "
+            f"(VIDEO mode, det={min_detection_confidence}, "
+            f"track={min_tracking_confidence})"
+        )
+
+    # ── Public API ─────────────────────────────────────────────────────────────
+
+    def process_frame(
+        self, frame: np.ndarray
+    ) -> Tuple[Optional[np.ndarray], np.ndarray]:
+        """
+        Run MediaPipe HandLandmarker on a BGR webcam frame.
+
+        Returns
+        ───────
+        landmarks : (21, 3) float32 array of normalised [x, y, z], or None
+        annotated : BGR frame with skeleton and landmark dots drawn
+        """
+        annotated = frame.copy()
+        h, w      = frame.shape[:2]
+
+        # BGR → RGB → MediaPipe Image
+        rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_img = self._mp.Image(
+            image_format=self._mp.ImageFormat.SRGB, data=rgb
+        )
+
+        # VIDEO mode requires a monotonically increasing timestamp in ms
+        timestamp_ms = int((time.monotonic() - self._t0) * 1000)
+        result = self._landmarker.detect_for_video(mp_img, timestamp_ms)
+
+        if not result.hand_landmarks:
+            cv2.putText(
+                annotated,
+                "No hand detected — show hand to camera",
+                (12, 36), cv2.FONT_HERSHEY_SIMPLEX,
+                0.60, _RED, 2, cv2.LINE_AA,
+            )
+            return None, annotated
+
+        # Convert to (21, 3) numpy array
+        hand     = result.hand_landmarks[0]
+        lm_array = np.array(
+            [[lm.x, lm.y, lm.z] for lm in hand],
+            dtype=np.float32,
+        )
+
+        # Draw skeleton connections
+        for a_idx, b_idx in _CONNECTIONS:
+            ax = int(lm_array[a_idx, 0] * w)
+            ay = int(lm_array[a_idx, 1] * h)
+            bx = int(lm_array[b_idx, 0] * w)
+            by = int(lm_array[b_idx, 1] * h)
+            cv2.line(annotated, (ax, ay), (bx, by), _CYAN, 2, cv2.LINE_AA)
+
+        # Draw landmark dots
+        for lm in lm_array:
+            cx, cy = int(lm[0] * w), int(lm[1] * h)
+            cv2.circle(annotated, (cx, cy), 5, _AMBER, -1)
+            cv2.circle(annotated, (cx, cy), 3, _GREEN,  1)
+
+        # Handedness label near wrist
+        if result.handedness:
+            side = result.handedness[0][0].display_name
+            wx   = int(lm_array[WRIST, 0] * w)
+            wy   = int(lm_array[WRIST, 1] * h) + 30
+            cv2.putText(
+                annotated, side, (wx, wy),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, _AMBER, 2
+            )
+
+        return lm_array, annotated
+
+    def analyse(self, landmarks: np.ndarray) -> HandAnalysis:
+        """Full anatomical analysis of a (21, 3) landmark array."""
+        if landmarks is None or landmarks.shape != (21, 3):
+            return HandAnalysis(landmarks=np.zeros((21, 3), dtype=np.float32))
+
+        a            = HandAnalysis(landmarks=landmarks)
+        hand_w       = float(landmarks[:, 0].max() - landmarks[:, 0].min()) + 1e-6
+        a.finger_states  = self._finger_states(landmarks, hand_w)
+        a.extended_count = sum(a.finger_states)
+        a.thumb_up       = self._is_thumb_up(landmarks)
+        a.joint_angles   = self._joint_angles(landmarks)
+        a.raw_gesture, a.confidence = self._classify(a)
+        return a
+
+    def classify(self, landmarks: Optional[np.ndarray]) -> Optional[str]:
+        """Convenience wrapper — returns gesture label or None."""
+        if landmarks is None:
             return None
+        return self.analyse(landmarks).raw_gesture
 
-        perimeter = cv2.arcLength(contour, True)
-        circularity = 4 * np.pi * area / (perimeter ** 2) if perimeter > 0 else 0
+    def close(self) -> None:
+        self._landmarker.close()
+        logger.info("RuleBasedClassifier closed.")
 
-        # Hull points (extrema)
-        hull = cv2.convexHull(contour)
+    # ── Private: geometry ──────────────────────────────────────────────────────
 
-        # Approximate contour
-        epsilon = 0.02 * perimeter
-        approx = cv2.approxPolyDP(contour, epsilon, True)
+    def _finger_states(self, lm: np.ndarray, hand_w: float) -> List[bool]:
+        """
+        [thumb, index, middle, ring, pinky] extension states.
+
+        Improved finger extension: a finger is extended only when BOTH:
+          - tip.y < pip.y  (tip above second joint)
+          - tip.y < dip.y  (tip above first joint)
+        This dual check prevents closed-fist misclassification where slight
+        hand curvature makes tip.y marginally above pip.y.
+        """
+        # Thumb: extended when tip is significantly further from wrist than MCP
+        thumb_ext = (
+            abs(lm[THUMB_TIP, 0] - lm[WRIST, 0]) >
+            abs(lm[THUMB_MCP, 0] - lm[WRIST, 0]) * 1.3
+        )
+
+        # Index → Pinky: BOTH tip above pip AND tip above dip
+        # DIP indices: 7=index_dip, 11=middle_dip, 15=ring_dip, 19=pinky_dip
+        finger_pairs_with_dip = [
+            (INDEX_TIP,  INDEX_PIP,  INDEX_DIP),
+            (MIDDLE_TIP, MIDDLE_PIP, MIDDLE_DIP),
+            (RING_TIP,   RING_PIP,   RING_DIP),
+            (PINKY_TIP,  PINKY_PIP,  PINKY_DIP),
+        ]
+        finger_ext = [
+            float(lm[tip, 1]) < float(lm[pip, 1]) and
+            float(lm[tip, 1]) < float(lm[dip, 1])
+            for tip, pip, dip in finger_pairs_with_dip
+        ]
+
+        return [thumb_ext] + finger_ext
+
+    def _is_thumb_up(self, lm: np.ndarray) -> bool:
+        """
+        True when thumb tip is clearly above the wrist AND above index MCP.
+        Tighter check than before to avoid false positives on closed fist.
+        """
+        wrist_y     = lm[WRIST,     1]
+        thumb_tip_y = lm[THUMB_TIP, 1]
+        index_mcp_y = lm[INDEX_MCP, 1]
+        hand_h      = abs(wrist_y - index_mcp_y) + 1e-6
+        # Thumb must be above wrist by at least 1x hand height
+        # AND above the index MCP knuckle
+        return (
+            (wrist_y - thumb_tip_y) > hand_h * 1.0 and
+            thumb_tip_y < index_mcp_y
+        )
+
+    def _joint_angles(self, lm: np.ndarray) -> Dict[str, float]:
+        def angle(a: int, b: int, c: int) -> float:
+            v1 = lm[a] - lm[b]
+            v2 = lm[c] - lm[b]
+            cos_t = np.dot(v1, v2) / (
+                np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-8
+            )
+            return float(math.degrees(math.acos(np.clip(cos_t, -1.0, 1.0))))
 
         return {
-            'area': area,
-            'perimeter': perimeter,
-            'circularity': circularity,
-            'hull': hull,
-            'approx': approx,
-            'contour': contour,
+            "index_pip":  angle(INDEX_MCP,  INDEX_PIP,  INDEX_TIP),
+            "middle_pip": angle(MIDDLE_MCP, MIDDLE_PIP, MIDDLE_TIP),
+            "ring_pip":   angle(RING_MCP,   RING_PIP,   RING_TIP),
+            "pinky_pip":  angle(PINKY_MCP,  PINKY_PIP,  PINKY_TIP),
+            "thumb_ip":   angle(THUMB_MCP,  THUMB_IP,   THUMB_TIP),
         }
 
-    def classify(self, features: Optional[dict]) -> Optional[str]:
+    # ── Private: classification rules ─────────────────────────────────────────
+
+    def _classify(self, a: HandAnalysis) -> Tuple[Optional[str], float]:
         """
-        Classify gesture based on hand contour features.
-        Simple heuristics:
-        - High circularity + small hull points → closed_fist
-        - Low circularity + many hull points → open_hand
-        - etc.
+        Priority-ordered rule engine mapping hand pose to gesture label.
+
+        Key design decisions:
+        - thumbs_up checked BEFORE closed_fist because both have no extended
+          fingers — thumb_up flag differentiates them
+        - open_hand requires at least 3 of 4 fingers to be robust to
+          partial occlusion of pinky
+        - DIP+PIP dual check in _finger_states prevents closed fist from
+          being read as open hand due to hand curvature
         """
-        if not features:
-            return None
+        thumb  = a.finger_states[0]
+        index  = a.finger_states[1]
+        middle = a.finger_states[2]
+        ring   = a.finger_states[3]
+        pinky  = a.finger_states[4]
 
-        circularity = features.get('circularity', 0)
-        hull = features.get('hull', [])
-        hull_len = len(hull) if hull is not None else 0
+        fingers_up = sum([index, middle, ring, pinky])
 
-        # Simple classification
-        if hull_len < 6:
-            return "closed_fist"
-        elif hull_len > 12:
-            return "open_hand"
-        elif hull_len >= 8 and hull_len <= 12:
-            # Could be peace sign or thumbs up - use circular heuristic
-            if circularity > 0.5:
-                return "thumbs_up"
-            else:
-                return "peace_sign"
-        else:
-            return "pointing"
+        # thumbs_up — MUST check before closed_fist
+        # Thumb clearly pointing up, all four fingers curled
+        if a.thumb_up and not index and not middle and not ring and not pinky:
+            return "thumbs_up", 0.93
 
-    def process_frame(self, frame_bgr: np.ndarray):
-        """
-        Detect hand and extract features.
-        Returns (features_dict, annotated_frame).
-        """
-        # Convert to HSV for better skin detection
-        frame_hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+        # open_hand — all four main fingers extended (thumb optional)
+        if index and middle and ring and pinky:
+            return "open_hand", 0.95 if thumb else 0.88
 
-        # Detect hand region
-        mask = self._detect_hand(frame_hsv)
+        # open_hand — 3 of 4 fingers extended (robust to pinky occlusion)
+        if fingers_up == 3 and (index and middle and ring):
+            return "open_hand", 0.80
 
-        annotated = frame_bgr.copy()
-        features = None
+        # peace_sign — index + middle only
+        if index and middle and not ring and not pinky:
+            return "peace_sign", 0.92
 
-        if mask is not None:
-            # Find contours
-            contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        # pointing — index only
+        if index and not middle and not ring and not pinky:
+            return "pointing", 0.90
 
-            if contours:
-                # Get largest contour (should be hand)
-                largest_contour = max(contours, key=cv2.contourArea)
-                features = self._get_contour_features(largest_contour)
+        # closed_fist — no main fingers extended
+        if not index and not middle and not ring and not pinky:
+            return "closed_fist", 0.91
 
-                if features:
-                    # Draw hand region
-                    cv2.drawContours(annotated, [features['contour']], 0, (0, 255, 0), 2)
-                    cv2.drawContours(annotated, [features['hull']], 0, (255, 0, 0), 2)
-
-        return features, annotated
-
-    def close(self):
-        """Cleanup (no resources to release)."""
-        pass
+        return None, 0.0
 
 
-# ── CNN Classifier (Placeholder) ──────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# CNN Classifier
+# ══════════════════════════════════════════════════════════════════════════════
 
 class CNNClassifier:
     """
-    CNN-based gesture classifier using trained MobileNetV2 model.
-    Loads model from train_model.py and performs real-time inference.
+    MobileNetV2 transfer-learning gesture classifier.
+    model_path=None builds the architecture with ImageNet weights (for testing).
     """
 
-    IMG_SIZE = (224, 224)
+    IMG_SIZE    = (224, 224)
     NUM_CLASSES = 5
 
-    def __init__(self, model_path: str):
-        """
-        Load trained CNN model.
-
-        Args:
-            model_path: Path to trained .h5 model file
-        """
-        if model_path is None:
-            raise ValueError("model_path is required for CNNClassifier")
-
-        try:
-            import tensorflow as tf
-            self.model = tf.keras.models.load_model(model_path)
-            print(f"[CNNClassifier] ✓ Loaded model from {model_path}")
-        except ImportError:
-            raise ImportError(
-                "TensorFlow not installed. Install with: pip install tensorflow>=2.13.0"
-            )
-        except Exception as e:
-            raise RuntimeError(f"Failed to load model from {model_path}: {e}")
+    def __init__(self, model_path: Optional[str] = None) -> None:
+        self.model_path = model_path
+        self.model      = self._load_or_build(model_path)
 
     def preprocess(self, frame_bgr: np.ndarray) -> np.ndarray:
-        """
-        Preprocess frame for CNN input.
-
-        Args:
-            frame_bgr: OpenCV BGR image
-
-        Returns:
-            Preprocessed image tensor (1, 224, 224, 3)
-        """
-        # Resize to model input size
-        img = cv2.resize(frame_bgr, self.IMG_SIZE)
-
-        # Convert BGR to RGB (TensorFlow expects RGB)
+        """BGR frame → (1, 224, 224, 3) float32 tensor, values in [0, 1]."""
+        img = cv2.resize(frame_bgr, self.IMG_SIZE, interpolation=cv2.INTER_AREA)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-        # Normalize to [0, 1]
         img = img.astype(np.float32) / 255.0
+        return np.expand_dims(img, axis=0)
 
-        # Add batch dimension
-        img = np.expand_dims(img, axis=0)
-
-        return img
-
-    def predict(self, frame_bgr: np.ndarray) -> Tuple[Optional[str], float]:
-        """
-        Predict gesture from frame.
-
-        Args:
-            frame_bgr: OpenCV BGR image
-
-        Returns:
-            Tuple of (gesture_name, confidence)
-        """
+    def predict(
+        self, frame_bgr: np.ndarray
+    ) -> Tuple[Optional[str], float, np.ndarray]:
+        """Returns (label, confidence, probability_vector)."""
         if self.model is None:
-            return None, 0.0
+            return None, 0.0, np.zeros(self.NUM_CLASSES, dtype=np.float32)
+        probs = self.model.predict(self.preprocess(frame_bgr), verbose=0)[0]
+        idx   = int(np.argmax(probs))
+        return GESTURE_LABELS[idx], float(probs[idx]), probs
 
-        # Preprocess
-        img_tensor = self.preprocess(frame_bgr)
+    def classify(self, frame_bgr: np.ndarray) -> Optional[str]:
+        label, _, _ = self.predict(frame_bgr)
+        return label
 
-        # Inference
-        predictions = self.model.predict(img_tensor, verbose=0)
-
-        # Get top prediction
-        class_idx = np.argmax(predictions[0])
-        confidence = float(predictions[0][class_idx])
-
-        # Map to gesture name
-        gesture_name = GESTURE_LABELS.get(class_idx, None)
-
-        return gesture_name, confidence
-
-    def save(self, path: str):
-        """Save model to disk."""
+    def save(self, path: str) -> None:
         if self.model is not None:
             self.model.save(path)
-            print(f"[CNNClassifier] Model saved to {path}")
+            logger.info(f"CNNClassifier saved → {path}")
+
+    def _load_or_build(self, model_path: Optional[str]):
+        try:
+            import tensorflow as tf
+            from tensorflow.keras import layers, Model
+            from tensorflow.keras.applications import MobileNetV2
+
+            if model_path is not None:
+                model = tf.keras.models.load_model(model_path)
+                logger.info(f"CNNClassifier: loaded from {model_path}")
+                return model
+
+            base = MobileNetV2(
+                input_shape=(*self.IMG_SIZE, 3),
+                include_top=False,
+                weights="imagenet",
+            )
+            base.trainable = False
+            inputs  = tf.keras.Input(shape=(*self.IMG_SIZE, 3))
+            x       = base(inputs, training=False)
+            x       = layers.GlobalAveragePooling2D(name="gap")(x)
+            x       = layers.Dense(256, activation="relu")(x)
+            x       = layers.Dropout(0.3)(x)
+            x       = layers.Dense(128, activation="relu")(x)
+            x       = layers.Dropout(0.2)(x)
+            outputs = layers.Dense(self.NUM_CLASSES, activation="softmax")(x)
+            model   = Model(inputs, outputs, name="gesture_mobilenetv2")
+            model.compile(
+                optimizer=tf.keras.optimizers.Adam(1e-4),
+                loss="categorical_crossentropy",
+                metrics=["accuracy"],
+            )
+            logger.info(f"CNNClassifier built — {model.count_params():,} params")
+            return model
+
+        except ImportError:
+            logger.warning("TensorFlow not installed — CNNClassifier.model is None.")
+            return None
+        except Exception as exc:
+            logger.error(f"CNNClassifier build error: {exc}")
+            return None
 
 
-# ── Temporal Smoother ─────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Temporal Smoother
+# ══════════════════════════════════════════════════════════════════════════════
 
 class TemporalSmoother:
-    """Reduces gesture flickering via majority vote + debounce."""
+    """
+    Recency-weighted majority vote + debounce for stable robot commands.
 
-    def __init__(self, window: int = 7, debounce_s: float = 0.8):
-        self.window = window
-        self.debounce_s = debounce_s
-        self._buffer: deque = deque(maxlen=window)
-        self._last_stable: Optional[str] = None
-        self._last_trigger_time: float = 0.0
+    Newer frames are weighted more heavily than older ones.
+    A label must win >= 60% of weighted votes to be emitted.
+    Same label is suppressed for debounce_s seconds after each emission.
+    """
 
-    def update(self, raw_gesture: Optional[str]) -> Optional[str]:
-        """Feed raw gesture; returns stable gesture if consensus + debounce met."""
-        self._buffer.append(raw_gesture)
+    def __init__(self, window: int = 7, debounce_s: float = 0.8) -> None:
+        self.window      = window
+        self.debounce_s  = debounce_s
+        self._buffer:    deque = deque(maxlen=window)
+        self._last_label: Optional[str] = None
+        self._last_time:  float = 0.0
+        self._weights = np.arange(1, window + 1, dtype=np.float32)
 
+    def update(self, label: Optional[str]) -> Optional[str]:
+        self._buffer.append(label)
         if len(self._buffer) < self.window:
             return None
 
-        counts = Counter(g for g in self._buffer if g is not None)
-        if not counts:
+        weighted: Dict[str, float] = {}
+        for i, lbl in enumerate(self._buffer):
+            if lbl is not None:
+                weighted[lbl] = weighted.get(lbl, 0.0) + self._weights[i]
+
+        if not weighted:
             return None
 
-        top_gesture, top_count = counts.most_common(1)[0]
-        if top_count < self.window * 0.7:
+        total  = float(self._weights.sum())
+        winner = max(weighted, key=weighted.get)
+        if weighted[winner] / total < 0.60:
             return None
 
-        now = time.time()
-        if top_gesture == self._last_stable:
-            if now - self._last_trigger_time < self.debounce_s:
-                return None
+        now = time.monotonic()
+        if winner == self._last_label and (now - self._last_time) < self.debounce_s:
+            return None
 
-        self._last_stable = top_gesture
-        self._last_trigger_time = now
-        return top_gesture
+        self._last_label = winner
+        self._last_time  = now
+        return winner
 
-    def reset(self):
+    def reset(self) -> None:
         self._buffer.clear()
-        self._last_stable = None
-        self._last_trigger_time = 0.0
+        self._last_label = None
+        self._last_time  = 0.0
+
+    @property
+    def last_gesture(self) -> Optional[str]:
+        return self._last_label
+
+    @property
+    def buffer_fill(self) -> float:
+        return len(self._buffer) / self.window
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ROS Publisher stub
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ROSPublisher:
+    """
+    Optional ROS integration — publishes geometry_msgs/Twist to /cmd_vel.
+    Degrades gracefully to no-op when ROS is not installed (e.g. on Windows).
+
+    ROS Twist mapping:
+      FORWARD  → linear.x  = +0.30 m/s
+      BACKWARD → linear.x  = -0.20 m/s
+      LEFT     → angular.z = +0.50 rad/s
+      RIGHT    → angular.z = -0.50 rad/s
+      STOP     → all zero
+    """
+
+    def __init__(self, node_name: str = "gesture_controller",
+                 topic: str = "/cmd_vel") -> None:
+        self._available = False
+        self._pub = None
+        self._Twist = None
+        try:
+            import rospy
+            from geometry_msgs.msg import Twist
+            rospy.init_node(node_name, anonymous=True)
+            self._pub       = rospy.Publisher(topic, Twist, queue_size=10)
+            self._Twist     = Twist
+            self._available = True
+            logger.info(f"ROSPublisher active on {topic}")
+        except ImportError:
+            logger.info("ROSPublisher: ROS not available — simulation mode.")
+        except Exception as exc:
+            logger.warning(f"ROSPublisher init error: {exc}")
+
+    def publish(self, command: Optional[str]) -> bool:
+        if not self._available or command is None:
+            return False
+        profile = ROS_VELOCITY_PROFILES.get(command, ROS_VELOCITY_PROFILES["STOP"])
+        twist = self._Twist()
+        twist.linear.x  = profile["linear_x"]
+        twist.angular.z = profile["angular_z"]
+        self._pub.publish(twist)
+        return True
+
+    @property
+    def is_available(self) -> bool:
+        return self._available
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Self-test
+# ══════════════════════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    import sys
+    logging.basicConfig(level=logging.INFO)
+
+    print("\n" + "═" * 58)
+    print("  gesture_classifier.py — self test")
+    print("═" * 58)
+
+    print("\n[1] RuleBasedClassifier...")
+    clf = RuleBasedClassifier()
+    print("    ✓")
+
+    print("\n[2] Dummy frame (blank — no hand expected)...")
+    dummy = np.zeros((480, 640, 3), dtype=np.uint8)
+    lm, ann = clf.process_frame(dummy)
+    assert ann.shape == (480, 640, 3)
+    print(f"    ✓  landmarks={'detected' if lm is not None else 'none (expected)'}")
+
+    print("\n[3] CNN preprocessing...")
+    cnn  = CNNClassifier()
+    rand = np.random.randint(0, 256, (480, 640, 3), dtype=np.uint8)
+    t    = cnn.preprocess(rand)
+    assert t.shape == (1, 224, 224, 3)
+    assert 0.0 <= t.min() and t.max() <= 1.0
+    print(f"    ✓  shape={t.shape}")
+
+    print("\n[4] Temporal smoother...")
+    sm = TemporalSmoother(window=7, debounce_s=0.8)
+    assert sm.update("closed_fist") is None
+    for _ in range(6):
+        sm.update("open_hand")
+    r = sm.update("open_hand")
+    assert r == "open_hand", f"Got {r}"
+    print(f"    ✓  majority vote → '{r}'")
+
+    print("\n[5] Constants...")
+    assert len(GESTURE_LABELS) == 5
+    assert GESTURE_LABELS[0]           == "closed_fist"
+    assert GESTURE_LABELS[1]           == "open_hand"
+    assert GESTURE_COMMANDS["closed_fist"] == "STOP"
+    assert GESTURE_COMMANDS["open_hand"]   == "FORWARD"
+    assert GESTURE_COMMANDS["thumbs_up"]   == "LEFT"
+    print(f"    ✓  {len(GESTURE_LABELS)} labels, {len(GESTURE_COMMANDS)} commands")
+
+    clf.close()
+    print("\n" + "═" * 58)
+    print("  All tests passed ✓")
+    print("═" * 58 + "\n")
+    sys.exit(0)

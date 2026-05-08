@@ -1,0 +1,16 @@
+<launch>
+  <arg name="turtlebot3_model" default="burger" />
+  <arg name="use_windows_bridge" default="true" />
+  <arg name="tcp_host" default="0.0.0.0" />
+  <arg name="tcp_port" default="5005" />
+
+  <env name="TURTLEBOT3_MODEL" value="$(arg turtlebot3_model)" />
+
+  <include file="$(find turtlebot3_gazebo)/launch/turtlebot3_house.launch" />
+
+  <include file="$(find gesture_control_ros)/launch/gesture_control.launch">
+    <arg name="use_windows_bridge" value="$(arg use_windows_bridge)" />
+    <arg name="tcp_host" value="$(arg tcp_host)" />
+    <arg name="tcp_port" value="$(arg tcp_port)" />
+  </include>
+</launch>

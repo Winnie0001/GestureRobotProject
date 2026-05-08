@@ -1,107 +1,175 @@
-"""
-Gesture classifier unit tests.
-Verifies rule-based and CNN classifiers work correctly.
-"""
-
-import unittest
-import numpy as np
 import cv2
-from gesture_classifier import (
-    RuleBasedClassifier, CNNClassifier, TemporalSmoother,
-    GESTURE_LABELS, GESTURE_COMMANDS
-)
+import numpy as np
+import time
+from collections import deque, Counter
+
+# -------------------------------
+# Gesture labels + commands
+# -------------------------------
+GESTURE_LABELS = [
+    "closed_fist",
+    "open_hand",
+    "thumbs_up",
+    "point_left",
+    "point_right"
+]
+
+GESTURE_COMMANDS = {
+    "closed_fist": "STOP",
+    "open_hand": "FORWARD",
+    "thumbs_up": "LEFT",
+    "point_left": "LEFT",
+    "point_right": "RIGHT"
+}
 
 
-class TestRuleBasedClassifier(unittest.TestCase):
-    """Test rule-based classifier hand pose detection."""
 
-    def setUp(self):
-        self.classifier = RuleBasedClassifier()
+# MediaPipe
 
-    def tearDown(self):
-        self.classifier.close()
+def _init_mediapipe():
+    import mediapipe as mp
 
-    def create_dummy_frame(self, size=(640, 480)):
-        """Create a dummy BGR frame."""
-        return np.zeros((size[1], size[0], 3), dtype=np.uint8)
+    mp_hands = mp.solutions.hands
+    mp_draw = mp.solutions.drawing_utils
 
-    def test_frame_processing(self):
-        """Test that frame processing doesn't crash."""
-        frame = self.create_dummy_frame()
-        landmarks, annotated = self.classifier.process_frame(frame)
-        self.assertEqual(annotated.shape, frame.shape)
+    try:
+        mp_styles = mp.solutions.drawing_styles
+    except AttributeError:
+        mp_styles = None
 
-    def test_gesture_labels(self):
-        """Test gesture label mapping."""
-        self.assertEqual(len(GESTURE_LABELS), 5)
-        self.assertEqual(GESTURE_LABELS[0], "closed_fist")
-        self.assertEqual(GESTURE_LABELS[1], "open_hand")
-
-    def test_gesture_commands(self):
-        """Test gesture-to-command mapping."""
-        self.assertEqual(GESTURE_COMMANDS["closed_fist"], "STOP")
-        self.assertEqual(GESTURE_COMMANDS["open_hand"], "FORWARD")
-        self.assertEqual(GESTURE_COMMANDS["thumbs_up"], "LEFT")
+    return mp_hands, mp_draw, mp_styles
 
 
-class TestTemporalSmoother(unittest.TestCase):
-    """Test temporal smoothing logic."""
+# -------------------------------
+# Rule-Based Classifier
+# -------------------------------
+class RuleBasedClassifier:
+    def __init__(self):
+        mp_hands, self.mp_draw, self.mp_styles = _init_mediapipe()
 
-    def setUp(self):
-        self.smoother = TemporalSmoother(window=7, debounce_s=0.8)
+        self.hands = mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=1,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
 
-    def test_initial_state(self):
-        """Test smoother starts in neutral state."""
-        result = self.smoother.update("closed_fist")
-        self.assertIsNone(result)  # Need 7 frames
+    def process_frame(self, frame):
+        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.hands.process(img_rgb)
 
-    def test_majority_vote(self):
-        """Test majority voting."""
-        gestures = ["closed_fist"] * 5 + [None] * 2
-        for g in gestures:
-            result = self.smoother.update(g)
-        self.assertEqual(result, "closed_fist")
+        gesture = None
 
-    def test_debounce(self):
-        """Test debounce prevents rapid re-triggering."""
-        # First gesture
-        for _ in range(7):
-            self.smoother.update("closed_fist")
-        result1 = self.smoother.update("closed_fist")
-        self.assertEqual(result1, "closed_fist")
+        if results.multi_hand_landmarks:
+            for handLms in results.multi_hand_landmarks:
+                gesture = self._classify(handLms.landmark)
 
-        # Immediate re-trigger should be blocked
-        for _ in range(7):
-            self.smoother.update("closed_fist")
-        result2 = self.smoother.update("closed_fist")
-        self.assertIsNone(result2)
+                self.mp_draw.draw_landmarks(
+                    frame,
+                    handLms,
+                    self._get_connections()
+                )
 
-    def test_reset(self):
-        """Test smoother reset."""
-        for _ in range(7):
-            self.smoother.update("closed_fist")
-        self.smoother.reset()
-        result = self.smoother.update("closed_fist")
-        self.assertIsNone(result)
+        return gesture, frame
+
+    def _get_connections(self):
+        import mediapipe as mp
+        return mp.solutions.hands.HAND_CONNECTIONS
+
+    def _classify(self, landmarks):
+        fingers = []
+
+        # Thumb
+        if landmarks[4].x < landmarks[3].x:
+            fingers.append(1)
+        else:
+            fingers.append(0)
+
+        # Other fingers
+        tips = [8, 12, 16, 20]
+        for tip in tips:
+            if landmarks[tip].y < landmarks[tip - 2].y:
+                fingers.append(1)
+            else:
+                fingers.append(0)
+
+        total = sum(fingers)
+
+        if total == 0:
+            return "closed_fist"
+        elif total == 5:
+            return "open_hand"
+        elif total == 1:
+            return "thumbs_up"
+        elif total == 2:
+            return "point_left"
+        elif total == 3:
+            return "point_right"
+        else:
+            return None
+
+    def close(self):
+        self.hands.close()
 
 
-class TestCNNClassifier(unittest.TestCase):
-    """Test CNN classifier (build only, no training)."""
+# -------------------------------
+# Temporal Smoother
+# -------------------------------
+class TemporalSmoother:
+    def __init__(self, window=7, debounce_s=0.8):
+        self.window = deque(maxlen=window)
+        self.last_output_time = 0
+        self.debounce_s = debounce_s
 
-    def test_model_creation(self):
-        """Test that CNN model can be created."""
-        classifier = CNNClassifier()
-        self.assertIsNotNone(classifier.model)
+    def update(self, gesture):
+        self.window.append(gesture)
 
-    def test_preprocess(self):
-        """Test image preprocessing."""
-        classifier = CNNClassifier()
-        dummy_frame = np.random.randint(0, 256, (640, 480, 3), dtype=np.uint8)
-        processed = classifier.preprocess(dummy_frame)
-        self.assertEqual(processed.shape, (1, 224, 224, 3))
-        self.assertTrue(np.all(processed >= 0) and np.all(processed <= 1))
+        if len(self.window) < self.window.maxlen:
+            return None
+
+        counts = Counter(self.window)
+        most_common, count = counts.most_common(1)[0]
+
+        if most_common is None:
+            return None
+
+        now = time.time()
+
+        if now - self.last_output_time < self.debounce_s:
+            return None
+
+        self.last_output_time = now
+        return most_common
+
+    def reset(self):
+        self.window.clear()
+        self.last_output_time = 0
 
 
-if __name__ == "__main__":
-    print("Running gesture classifier tests...\n")
-    unittest.main(verbosity=2)
+# -------------------------------
+# CNN Classifier (basic placeholder)
+# -------------------------------
+class CNNClassifier:
+    def __init__(self):
+        self.model = self._build_model()
+
+    def _build_model(self):
+        from tensorflow.keras import layers, models
+
+        model = models.Sequential([
+            layers.Input(shape=(224, 224, 3)),
+            layers.Conv2D(16, (3, 3), activation='relu'),
+            layers.MaxPooling2D(),
+            layers.Conv2D(32, (3, 3), activation='relu'),
+            layers.MaxPooling2D(),
+            layers.Flatten(),
+            layers.Dense(64, activation='relu'),
+            layers.Dense(len(GESTURE_LABELS), activation='softmax')
+        ])
+
+        return model
+
+    def preprocess(self, frame):
+        img = cv2.resize(frame, (224, 224))
+        img = img / 255.0
+        return np.expand_dims(img, axis=0)

@@ -46,7 +46,17 @@ class GestureROSNode:
             raise ValueError(f"Unknown mode: {mode}")
 
         self.mode = mode
-        self.smoother = TemporalSmoother(window=7, debounce_s=0.8)
+        smoother_window = int(rospy.get_param('~smoother_window', 11))
+        debounce_s = float(rospy.get_param('~debounce_s', 1.2))
+        self.smoother = TemporalSmoother(window=smoother_window, debounce_s=debounce_s)
+        self._publish_hold_s = float(rospy.get_param('~publish_hold_s', 0.35))
+        self._last_published_gesture = None
+        self._candidate_gesture = None
+        self._candidate_since_s = None
+
+        # Safety: if no stable gesture is detected for a while, force STOP
+        self._no_stable_frames = 0
+        self._max_no_stable_frames = rospy.get_param('~max_no_stable_frames', 8)
 
         # ROS Publishers
         self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
@@ -113,24 +123,46 @@ class GestureROSNode:
             features, annotated = self.classifier.process_frame(frame)
             gesture = self.classifier.classify(features)
         else:  # CNN
-            gesture, confidence = self.classifier.predict(frame)
+            gesture, confidence, _ = self.classifier.predict(frame)
             annotated = frame
 
         # Temporal smoothing
         stable_gesture = self.smoother.update(gesture)
+        now_s = rospy.Time.now().to_sec()
 
-        if stable_gesture:
+        if stable_gesture != self._last_published_gesture:
+            if stable_gesture != self._candidate_gesture:
+                self._candidate_gesture = stable_gesture
+                self._candidate_since_s = now_s
+            elif (
+                self._candidate_since_s is not None
+                and (now_s - self._candidate_since_s) >= self._publish_hold_s
+            ):
+                self._last_published_gesture = stable_gesture
+        else:
+            self._candidate_gesture = None
+            self._candidate_since_s = None
+
+        # Safety: publish STOP if stable gesture is lost for too long
+        if self._last_published_gesture:
+            self._no_stable_frames = 0
+
             # Publish gesture
             gesture_msg = String()
-            gesture_msg.data = stable_gesture
+            gesture_msg.data = self._last_published_gesture
             self.gesture_pub.publish(gesture_msg)
 
             # Publish robot command
-            twist = self.gesture_to_twist(stable_gesture)
+            twist = self.gesture_to_twist(self._last_published_gesture)
             self.cmd_vel_pub.publish(twist)
 
-            command = GESTURE_COMMANDS.get(stable_gesture, "UNKNOWN")
-            rospy.loginfo(f"[GestureNode] {stable_gesture} -> {command}")
+            command = GESTURE_COMMANDS.get(self._last_published_gesture, "UNKNOWN")
+            rospy.loginfo(f"[GestureNode] {self._last_published_gesture} -> {command}")
+        else:
+            self._no_stable_frames += 1
+            if self._no_stable_frames >= self._max_no_stable_frames:
+                self.cmd_vel_pub.publish(Twist())
+                self._no_stable_frames = 0
 
     def run(self):
         """

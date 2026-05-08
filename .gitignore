@@ -11,6 +11,7 @@ venv/
 ENV/
 env/
 train_env/
+train_venv/
 
 # IDEs
 .vscode/

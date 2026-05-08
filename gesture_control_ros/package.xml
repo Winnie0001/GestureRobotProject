@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>gesture_control_ros</name>
+  <version>1.0.0</version>
+  <description>
+    AI-Powered Gesture Control for Robot Navigation
+    BA-25-1058 Honours Project by Mmesoma Kenneth (202307951)
+  </description>
+
+  <maintainer email="kennethm@student.hull.ac.uk">Mmesoma Kenneth</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>cv_bridge</depend>
+  <depend>actionlib</depend>
+  <depend>actionlib_msgs</depend>
+  <depend>move_base_msgs</depend>
+
+  <export></export>
+</package>

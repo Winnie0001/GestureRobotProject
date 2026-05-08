@@ -115,7 +115,7 @@ Generates:
 
 1. Copy project to ROS workspace:
 ```bash
-cp -r HonoursProject-ROS ~/catkin_ws/src/honours_project_ros
+cp -r HonoursProject-ROS/gesture_control_ros ~/catkin_ws/src/gesture_control_ros
 cd ~/catkin_ws
 catkin_make
 source devel/setup.bash
@@ -123,30 +123,60 @@ source devel/setup.bash
 
 2. Make Python scripts executable:
 ```bash
-chmod +x ~/catkin_ws/src/honours_project_ros/ros_gesture_node.py
+chmod +x ~/catkin_ws/src/gesture_control_ros/scripts/gesture_publisher.py
+chmod +x ~/catkin_ws/src/gesture_control_ros/scripts/robot_controller.py
 ```
 
 ### Launch Gesture Control Node
 
 **With Rule-Based Classifier:**
 ```bash
-roslaunch honours_project_ros gesture_control.launch mode:=rule
+roslaunch gesture_control_ros gesture_control.launch mode:=rule
 ```
 
 **With CNN Classifier:**
 ```bash
-roslaunch honours_project_ros gesture_control.launch mode:=cnn model:=models/gesture_model.h5
+roslaunch gesture_control_ros gesture_control.launch mode:=cnn model:=models/gesture_model.h5
+```
+
+**Navigation Mode (move_base Waypoints in Gazebo):**
+```bash
+roslaunch gesture_control_ros gesture_control.launch control_mode:=nav
+```
+
+To set waypoint coordinates using RViz:
+
+1. Open RViz for your robot/navigation stack.
+2. Use the **2D Nav Goal** tool to click a target pose.
+3. Read the goal pose from the ROS topic (gives x, y and orientation quaternion):
+
+```bash
+rostopic echo -n 1 /move_base_simple/goal
+```
+
+4. Use the printed `position.x`, `position.y` and choose a `yaw` (in radians) for your waypoint parameters.
+5. Launch with custom waypoint args:
+
+```bash
+roslaunch gesture_control_ros gesture_control.launch control_mode:=nav wp1_x:=2.0 wp1_y:=0.5 wp1_yaw:=0.0
 ```
 
 ### ROS Topics
 
 **Published:**
 - `/cmd_vel` (geometry_msgs/Twist) - Robot velocity commands
-- `/gesture_detected` (std_msgs/String) - Detected gesture name
+- `/gesture/detected` (std_msgs/String) - Detected gesture name
+- `/gesture/command` (std_msgs/String) - Mapped robot command (FORWARD/BACKWARD/LEFT/RIGHT/STOP)
 
 **Parameters:**
-- `~linear_speed` (default: 0.3 m/s) - Forward/backward speed
+- `~linear_speed` (default: 0.2 m/s) - Forward/backward speed
 - `~angular_speed` (default: 0.5 rad/s) - Rotation speed
+- `~max_no_stable_frames` (default: 8) - Force STOP after N frames without a stable gesture
+
+In `control_mode:=nav`, the robot controller sends `move_base` goals in the `map` frame using waypoint parameters:
+- `~wp1_x`, `~wp1_y`, `~wp1_yaw`
+- `~wp2_x`, `~wp2_y`, `~wp2_yaw`
+- `~wp3_x`, `~wp3_y`, `~wp3_yaw`
 
 ---
 
@@ -228,6 +258,38 @@ Dense(5, softmax) → [fist, palm, thumbs_up, victory, pointer]
 | Peace Sign | 81% |
 | Pointing | 79% |
 
+### Navigation (move_base) Evaluation
+
+When running `control_mode:=nav`, you can record navigation performance (success rate and time-to-goal) by listening to `/gesture/nav_status`:
+
+```bash
+rosrun gesture_control_ros nav_evaluate.py
+```
+
+This saves `nav_evaluation_results.json` on shutdown.
+
+To generate a single plot image (outcome pie + time-to-goal bars) for your report appendix:
+
+```bash
+rosrun gesture_control_ros nav_plot_results.py --input nav_evaluation_results.json --output nav_evaluation_plots.png
+```
+
+### Session Recording (Reproducible Experiments)
+
+To record a full run (gestures, commands, `/cmd_vel`, odometry, and navigation status) into a timestamped JSON file:
+
+```bash
+rosrun gesture_control_ros session_recorder.py
+```
+
+This produces `gesture_session_YYYYMMDD_HHMMSS.json` on shutdown.
+
+To compute quantitative metrics and generate plots (command rate, smoothness proxy, STOP reaction time):
+
+```bash
+rosrun gesture_control_ros session_analyze.py --input gesture_session_YYYYMMDD_HHMMSS.json --metrics-out session_metrics.json --plot-out session_plots.png
+```
+
 ---
 
 ## Usage Examples
@@ -291,6 +353,27 @@ python -c "import cv2; cap = cv2.VideoCapture(0); print('Webcam:', cap.isOpened(
 - Check Python path in launch file
 - Verify `catkin_make` succeeded
 - Source workspace: `source devel/setup.bash`
+
+---
+
+## Safety and Risk Checklist
+
+Before testing with a real robot or in a crowded environment:
+
+- **Emergency stop**
+  - Use the **closed_fist** gesture to issue STOP.
+  - In `control_mode:=nav`, STOP also cancels active `move_base` goals.
+- **Loss-of-gesture safety**
+  - The system forces a STOP if no stable gesture is detected for `~max_no_stable_frames`.
+- **Test environment**
+  - Use an open space and low speed settings for initial tests.
+  - Keep the robot away from stairs/edges and fragile objects.
+- **Camera and lighting risks**
+  - Poor lighting/background clutter can increase misclassification risk.
+  - Use a plain background and stable lighting for demos.
+- **Operational limits**
+  - Start with reduced `~linear_speed` and `~angular_speed`.
+  - Validate waypoints in simulation before using them on hardware.
 
 ---
 
